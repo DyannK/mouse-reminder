@@ -97,6 +97,7 @@ Contoh:
 
 *Ubah reminder yang sudah ada (berlaku utk kedua tipe kecuali disebutkan):*
 /setjam <id> <jadwal baru> → khusus reminder berulang
+/setdeadline <id> | <DD-MM-YYYY HH:MM> | <milestone> → khusus deadline (milestone opsional, kalau kosong pakai yang lama)
 /setpesan <id> <pesan baru> → berlaku utk kedua tipe, boleh pakai {sisa} dan {judul}
 /setjitter <id> <detik> → khusus reminder berulang, default 15 detik
 
@@ -286,6 +287,57 @@ async function handleCommand(sock, text, fromJid, rebuildSchedules) {
         await sock.sendMessage(fromJid, {
             text: `✅ Deadline reminder "${id}" dibuat.\nTarget: ${tanggalStr}\nJudul: ${judul}\nAkan diingetin: ${daftarMilestone}\n\nMau custom pesannya? Pakai /setpesan ${id} <teks>, boleh pakai {sisa} dan {judul}.\nMau AI yang generate teks otomatis? Pakai /setpesan ${id} AI: <tema singkat>`
         });
+
+    } else if (command === '/setdeadline') {
+        // format: /setdeadline <id> | <DD-MM-YYYY HH:MM> | <milestone>
+        const rest = text.substring('/setdeadline'.length).trim();
+        const segments = rest.split('|').map(s => s.trim());
+        const idPart = segments[0]?.split(' ')[0];
+
+        const reminder = config.reminders.find(r => r.id === idPart);
+        if (!reminder) {
+            await sock.sendMessage(fromJid, { text: `❌ Reminder "${idPart}" gak ditemukan.` });
+            return;
+        }
+        if (reminder.type !== 'deadline') {
+            await sock.sendMessage(fromJid, { text: `❌ "${idPart}" bukan deadline reminder. Pakai /setjam kalau itu reminder berulang.` });
+            return;
+        }
+        if (segments.length < 2) {
+            await sock.sendMessage(fromJid, {
+                text: '❌ Format: /setdeadline <id> | <DD-MM-YYYY HH:MM> | <milestone>\nContoh: /setdeadline meeting | 06-07-2026 19:00 | 1hari,2jam'
+            });
+            return;
+        }
+
+        const tanggalStr = segments[1];
+        const milestoneStr = segments[2]; // opsional, kalau gak diisi milestone lama tetap dipakai
+
+        const targetResult = parseTargetDateTime(tanggalStr);
+        if (targetResult.error) {
+            await sock.sendMessage(fromJid, { text: `❌ ${targetResult.error}` });
+            return;
+        }
+
+        reminder.targetTimestamp = targetResult.timestamp;
+
+        if (milestoneStr) {
+            const milestoneResult = parseMilestones(milestoneStr);
+            if (milestoneResult.error) {
+                await sock.sendMessage(fromJid, { text: `❌ ${milestoneResult.error}` });
+                return;
+            }
+            reminder.milestones = milestoneResult.milestones;
+        }
+
+        // reset supaya semua milestone bisa terkirim ulang sesuai jadwal baru
+        reminder.firedMilestones = [];
+
+        saveConfig(config);
+        rebuildSchedules();
+
+        const daftarMilestone = reminder.milestones.map(m => m.label).join(', ');
+        await sock.sendMessage(fromJid, { text: `✅ Deadline "${idPart}" diupdate.\nTarget baru: ${tanggalStr}\nMilestone: ${daftarMilestone}` });
 
     } else if (command === '/setjam') {
         const id = parts[1];
