@@ -14,7 +14,7 @@ const { recordSample, buildStyleInstruction } = require('./styleProfiler');
 const { initTelegramScraper } = require('./telegramScraper');
 
 const { logGroupMessage, getGroupLogs } = require('./chatLogger');
-const { generateAIText, parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
+const { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
 
 const userStates = {};
 
@@ -24,9 +24,6 @@ const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 let scheduledTasks = [];
 let botJidNumber = null;
 let isCheckingDeadlines = false;
-
-// Perluasan detektor kata penutup agar lebih peka terhadap bahasa kasual
-const CANCEL_WORDS = ['gajadi', 'batal', 'ntar aja', 'udahan', 'cancel', 'sip', 'oke', 'ok', 'thanks', 'makasih', 'yaudah', 'oke dah', 'oke deh', 'bray'];
 
 function resetState(jid) {
     if (userStates[jid]?.timer) clearTimeout(userStates[jid].timer);
@@ -45,7 +42,7 @@ function setState(jid, mode, data = {}) {
     };
 }
 
-// MESIN PENERJEMAH TEMPLATE MANUAL & GENERATOR AI DIKEMBALIKAN UTUH
+// MESIN PENERJEMAH TEMPLATE MANUAL DAN GENERATOR AI
 async function resolveTemplateForJid(messageTemplate, manualFallback, jid, context = {}, formal = false) {
     if ((messageTemplate || '').startsWith('AI:')) {
         const tema = messageTemplate.replace('AI:', '').trim();
@@ -94,7 +91,6 @@ async function checkDeadlines(sock) {
                     const fallbackPesan = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
                     const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
                     
-                    // Penyaringan template diaktifkan kembali untuk memproses {judul} dan {sisa}
                     for (const jid of targetJids) {
                         const resolved = await resolveTemplateForJid(textPesan, fallbackPesan, jid, context, reminder.formal);
                         targetTextMap[jid] = resolved.text;
@@ -193,19 +189,19 @@ async function startBot() {
             return;
         }
 
-        // PENCEGAT MUTLAK KALIMAT PENUTUP KASUAL
-        const isCancel = CANCEL_WORDS.some(w => text.toLowerCase().includes(w) || text.toLowerCase() === w);
-        if (isCancel) {
-            resetState(fromJid);
-            await sock.sendMessage(fromJid, { text: 'oke siap, obrolan gue tutup ya bray.' }, { quoted: msg });
-            return;
-        }
-
+        // PEMROSESAN SESI INTERAKSI YANG SEDANG LOCK (STATE MACHINE)
         if (userStates[fromJid]) {
             const state = userStates[fromJid];
+            const lowText = text.trim().toLowerCase();
             
             if (state.mode === 'confirm_schedule') {
-                if (text.toLowerCase() === 'iya' || text.toLowerCase() === 'y') {
+                if (['gajadi', 'batal', 'cancel', 'ntar aja'].some(w => lowText.includes(w))) {
+                    resetState(fromJid);
+                    await sock.sendMessage(fromJid, { text: 'oke bray, pembuatan jadwal dibatalin ya.' }, { quoted: msg });
+                    return;
+                }
+
+                if (lowText === 'iya' || lowText === 'y') {
                     const data = state.data;
                     let targetTimestamp = Date.now();
                     
@@ -220,7 +216,6 @@ async function startBot() {
                         targetTimestamp = targetDate.getTime();
                     }
 
-                    // Penambahan format baku perbaikan untuk penanganan {judul}
                     config.reminders.push({
                         id: `ai_${Date.now().toString().slice(-4)}`,
                         type: 'deadline',
@@ -244,7 +239,7 @@ async function startBot() {
                     resetState(fromJid);
                     setupSchedules(sock);
                     await sock.sendMessage(fromJid, { text: 'jadwal udah gue simpen permanen ya coy.' });
-                } else if (text.toLowerCase() === 'chatan') {
+                } else if (lowText === 'chatan') {
                     setState(fromJid, 'chat');
                     await sock.sendMessage(fromJid, { text: 'oke gas, mau ngobrolin apaan nih?' });
                 } else {
@@ -254,6 +249,12 @@ async function startBot() {
             }
 
             if (state.mode === 'chat') {
+                if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke'].some(w => lowText === w || lowText.includes(w))) {
+                    resetState(fromJid);
+                    await sock.sendMessage(fromJid, { text: 'oke siap, obrolan gue tutup ya bray.' }, { quoted: msg });
+                    return;
+                }
+
                 const samples = config.styleProfiles?.[fromJid]?.samples || [];
                 const reply = await generateMimicReply(text, samples);
                 await sock.sendMessage(fromJid, { text: reply });
@@ -262,10 +263,17 @@ async function startBot() {
             }
         }
 
+        // EVALUASI PEMANTIK AWAL (JAPRI ATAU TAG DI GRUP)
         const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
         const isBotMentioned = mentionedJids.some(j => j.split(':')[0] === botJidNumber);
 
         if (!isGroup || isBotMentioned) {
+            // Validasi hak akses di jalur pribadi sebelum masuk antrean API
+            if (!isGroup && !isAuthorized(config, fromJid)) {
+                await sock.sendMessage(fromJid, { text: 'akses terbatas. daftar pake /daftar dulu cuy.' });
+                return;
+            }
+
             const intentData = await parseIntentFromText(text);
 
             if (intentData.intent === 'create_schedule') {
