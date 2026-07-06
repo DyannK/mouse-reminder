@@ -321,7 +321,7 @@ async function startBot() {
         console.log('Pairing code:', await sock.requestPairingCode(phoneNumber.trim()));
     }
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             if ((lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
