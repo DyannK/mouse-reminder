@@ -77,10 +77,11 @@ function buildStyleInstruction(jid) {
     return `Tulis dengan gaya mirip orang ini: ${parts.join('; ')}.`;
 }
 
-/** Cari JID berdasarkan nama target ("aku"/"owner" = owner sendiri, atau nama kontak tersimpan). */
+/** Cari JID/key berdasarkan nama target ("aku"/"owner" = owner sendiri, "bot" = persona bot, atau nama kontak). */
 function resolveJidForName(config, name) {
     const clean = name.trim().toLowerCase();
     if (clean === 'aku' || clean === 'saya' || clean === 'owner') return config.ownerJid;
+    if (clean === 'bot') return '__bot__'; // bukan JID asli, cuma key internal buat persona bot
     const contact = config.contacts.find(c => c.name.toLowerCase() === clean);
     return contact ? contact.jid : null;
 }

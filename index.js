@@ -6,7 +6,7 @@ const cron = require('node-cron');
 
 const { loadConfig, saveConfig } = require('./configManager');
 const { handleCommand, resolveTargetsToJids, isAuthorized } = require('./commandHandler');
-const { generateAIText } = require('./geminiClient');
+const { generateAIText, generateTagReply } = require('./geminiClient');
 const { computeTriggerTimestamp, milestoneKey } = require('./deadlineParser');
 const { computeNextCronFire } = require('./timeParser');
 const { recordSample, buildStyleInstruction } = require('./styleProfiler');
@@ -14,11 +14,13 @@ const { recordSample, buildStyleInstruction } = require('./styleProfiler');
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-const AI_BUFFER_MINUTES = 10; // seberapa jauh sebelum jadwal, teks AI mulai di-generate
+const AI_BUFFER_MINUTES = 10;   // seberapa jauh sebelum jadwal, teks AI mulai di-generate
+const TAG_COOLDOWN_MS = 10000;  // jeda minimal antar balasan tag-bot, biar gak gampang di-spam
 
 let scheduledTasks = [];
-// Menyimpan siapa saja yang baru saja share-contact dan sedang ditunggu balasan nama-nya.
 const pendingContacts = {};
+let lastTagReplyAt = 0;
+let botJidNumber = null; // nomor bot sendiri (tanpa suffix device), buat deteksi mention
 
 async function ownerNotify(sock, text) {
     const config = loadConfig();
@@ -30,23 +32,22 @@ async function ownerNotify(sock, text) {
 }
 
 /**
- * Resolve teks pesan buat SATU target jid tertentu (gaya AI beda per orang).
- * Kalau reminder.message diawali "AI:", generate pakai Gemini + gaya orang itu.
+ * Resolve teks buat SATU target jid, dari sebuah template pesan (message ATAU nowMessage).
+ * Kalau template diawali "AI:", generate pakai Gemini + gaya orang itu + toggle formal.
  * Return { text, usedFallback }.
  */
-async function resolveMessageTextForJid(reminder, jid, context = {}) {
-    if ((reminder.message || '').startsWith('AI:')) {
-        const tema = reminder.message.replace('AI:', '').trim();
+async function resolveTemplateForJid(messageTemplate, manualFallback, jid, context = {}, formal = false) {
+    if ((messageTemplate || '').startsWith('AI:')) {
+        const tema = messageTemplate.replace('AI:', '').trim();
         const styleInstruction = buildStyleInstruction(jid);
-        return await generateAIText(tema, context, styleInstruction, reminder.manualFallback);
+        return await generateAIText(tema, context, styleInstruction, manualFallback, formal);
     }
-    let text = reminder.message || '';
+    let text = messageTemplate || '';
     if (context.sisa) text = text.replace(/{sisa}/g, context.sisa);
     if (context.judul) text = text.replace(/{judul}/g, context.judul);
     return { text, usedFallback: false };
 }
 
-/** Kirim map {jid: text} satu-satu dengan simulasi "mengetik" + jeda antar target. */
 async function deliverToJids(sock, reminderId, targetTextMap) {
     for (const [jid, text] of Object.entries(targetTextMap)) {
         try {
@@ -65,7 +66,7 @@ async function deliverToJids(sock, reminderId, targetTextMap) {
 async function fireRecurringReminder(sock, reminderId) {
     const config = loadConfig();
     const reminder = config.reminders.find(r => r.id === reminderId);
-    if (!reminder) return; // sempat dihapus
+    if (!reminder) return;
 
     const targetJids = resolveTargetsToJids(config, reminder.targets || ['group']);
     const targetTextMap = {};
@@ -76,15 +77,14 @@ async function fireRecurringReminder(sock, reminderId) {
         if (preGen) {
             targetTextMap[jid] = preGen;
         } else {
-            const { text, usedFallback } = await resolveMessageTextForJid(reminder, jid);
+            const { text, usedFallback } = await resolveTemplateForJid(reminder.message, reminder.manualFallback, jid, {}, reminder.formal);
             targetTextMap[jid] = text;
             if (usedFallback) anyFallback = true;
         }
     }
 
     await deliverToJids(sock, reminder.id, targetTextMap);
-
-    reminder.pendingAIText = null; // reset, siklus pre-gen berikutnya mulai lagi
+    reminder.pendingAIText = null;
     saveConfig(config);
 
     if (anyFallback) {
@@ -113,7 +113,7 @@ async function checkRecurringAIPreGen(sock) {
         let anyFallback = false;
 
         for (const jid of targetJids) {
-            const { text, usedFallback } = await resolveMessageTextForJid(reminder, jid);
+            const { text, usedFallback } = await resolveTemplateForJid(reminder.message, reminder.manualFallback, jid, {}, reminder.formal);
             textsByJid[jid] = text;
             if (usedFallback) anyFallback = true;
         }
@@ -130,28 +130,32 @@ async function checkRecurringAIPreGen(sock) {
 }
 
 /**
- * Dicek tiap menit: loop semua deadline reminder. Untuk tiap milestone yang belum
- * terkirim: kalau sudah masuk buffer waktu, pre-generate teks AI-nya dulu; kalau
- * waktunya sudah lewat, kirim (pakai teks pre-generated kalau ada).
+ * Dicek tiap menit: loop semua deadline reminder & milestone-nya.
+ * - Masuk buffer waktu -> pre-generate teks AI (kalau AI).
+ * - Waktunya lewat -> kirim (pakai teks pre-generated kalau ada). Milestone "isAuto"
+ *   (pas waktu target) pakai template nowMessage, bukan message biasa.
+ * - Kalau semua milestone reminder ini udah kekirim semua -> hapus otomatis + notify owner.
  */
 async function checkDeadlines(sock) {
     const config = loadConfig();
     let changed = false;
+    const idsToRemove = [];
 
     for (const reminder of config.reminders) {
         if (reminder.type !== 'deadline') continue;
         if (!reminder.pendingAITexts) reminder.pendingAITexts = {};
-        const isAI = (reminder.message || '').startsWith('AI:');
 
         for (const milestone of reminder.milestones) {
             const key = milestoneKey(milestone);
             if (reminder.firedMilestones.includes(key)) continue;
 
             const triggerTs = computeTriggerTimestamp(milestone, reminder.targetTimestamp);
-            const context = { sisa: milestone.label, judul: reminder.judul };
+            const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
+            const manualFallback = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
+            const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
+            const isAI = (messageTemplate || '').startsWith('AI:');
 
             if (Date.now() >= triggerTs) {
-                // --- Waktunya kirim ---
                 const targetJids = resolveTargetsToJids(config, reminder.targets || ['group']);
                 const targetTextMap = {};
                 let anyFallback = false;
@@ -161,7 +165,7 @@ async function checkDeadlines(sock) {
                     if (preGen) {
                         targetTextMap[jid] = preGen;
                     } else {
-                        const { text, usedFallback } = await resolveMessageTextForJid(reminder, jid, context);
+                        const { text, usedFallback } = await resolveTemplateForJid(messageTemplate, manualFallback, jid, context, reminder.formal);
                         targetTextMap[jid] = text;
                         if (usedFallback) anyFallback = true;
                     }
@@ -177,13 +181,12 @@ async function checkDeadlines(sock) {
                 }
 
             } else if (isAI && Date.now() >= triggerTs - AI_BUFFER_MINUTES * 60 * 1000 && !reminder.pendingAITexts[key]) {
-                // --- Masuk buffer waktu, pre-generate dulu ---
                 const targetJids = resolveTargetsToJids(config, reminder.targets || ['group']);
                 const textsByJid = {};
                 let anyFallback = false;
 
                 for (const jid of targetJids) {
-                    const { text, usedFallback } = await resolveMessageTextForJid(reminder, jid, context);
+                    const { text, usedFallback } = await resolveTemplateForJid(messageTemplate, manualFallback, jid, context, reminder.formal);
                     textsByJid[jid] = text;
                     if (usedFallback) anyFallback = true;
                 }
@@ -195,6 +198,21 @@ async function checkDeadlines(sock) {
                     await ownerNotify(sock, `⚠️ AI gagal generate teks buat deadline "${reminder.id}" (pre-generate, milestone: ${milestone.label}), dipakai fallback. Reminder tetap terkirim ontime.`);
                 }
             }
+        }
+
+        if (reminder.firedMilestones.length >= reminder.milestones.length) {
+            idsToRemove.push(reminder.id);
+        }
+    }
+
+    if (idsToRemove.length > 0) {
+        for (const id of idsToRemove) {
+            const idx = config.reminders.findIndex(r => r.id === id);
+            if (idx !== -1) config.reminders.splice(idx, 1);
+        }
+        changed = true;
+        for (const id of idsToRemove) {
+            await ownerNotify(sock, `✅ Deadline "${id}" udah selesai (semua milestone terkirim) dan otomatis dihapus.`);
         }
     }
 
@@ -208,7 +226,7 @@ function setupSchedules(sock) {
     const config = loadConfig();
 
     config.reminders.forEach((reminder) => {
-        if (reminder.type === 'deadline') return; // ditangani checkDeadlines()
+        if (reminder.type === 'deadline') return;
 
         const task = cron.schedule(reminder.cronPattern, () => {
             const jitterMs = Math.random() * (reminder.jitterSeconds ?? 15) * 1000;
@@ -226,6 +244,28 @@ function setupSchedules(sock) {
     scheduledTasks.push(aiPreGenChecker);
 
     console.log(`Scheduler aktif: ${config.reminders.length} reminder terdaftar.`);
+}
+
+/** Bersihin teks mention ("@6281234567890") dari pesan biar prompt AI lebih bersih. */
+function stripMentions(text) {
+    return text.replace(/@\d+/g, '').trim();
+}
+
+async function handleTagMention(sock, msg, fromJid, text) {
+    const now = Date.now();
+    if (now - lastTagReplyAt < TAG_COOLDOWN_MS) return; // masih cooldown, diemin dulu
+
+    const cleanText = stripMentions(text) || '(gak ada teks tambahan)';
+    const styleInstruction = buildStyleInstruction('__bot__');
+    const reply = await generateTagReply(cleanText, styleInstruction);
+    if (!reply) return; // AI belum dikonfigurasi / gagal, diem aja daripada kasih balasan generik aneh
+
+    lastTagReplyAt = now;
+    try {
+        await sock.sendMessage(fromJid, { text: reply }, { quoted: msg });
+    } catch (err) {
+        console.error('Gagal kirim balasan tag:', err);
+    }
 }
 
 async function startBot() {
@@ -251,6 +291,7 @@ async function startBot() {
             if (shouldReconnect) startBot();
         } else if (connection === 'open') {
             console.log('Berhasil terhubung ke WhatsApp!');
+            botJidNumber = sock.user.id.split(':')[0];
             setupSchedules(sock);
             rl.close();
         }
@@ -259,11 +300,22 @@ async function startBot() {
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message) return;
-        if (msg.key.fromMe) return; // cegah self-echo
+        if (msg.key.fromMe) return;
 
         const fromJid = msg.key.remoteJid;
         const contactMsg = msg.message.contactMessage;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+
+        // --- Deteksi tag/mention ke bot di grup ---
+        const isGroup = fromJid.endsWith('@g.us');
+        if (isGroup && botJidNumber) {
+            const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const isMentioned = mentionedJids.some(j => j.split(':')[0] === botJidNumber);
+            if (isMentioned) {
+                await handleTagMention(sock, msg, fromJid, text);
+                return;
+            }
+        }
 
         // --- Langkah 1: ada kontak yang di-share ---
         if (contactMsg) {
@@ -301,10 +353,9 @@ async function startBot() {
             return;
         }
 
-        // --- Bukan command: rekam sebagai sample gaya ketikan (buat fitur niru gaya AI) ---
+        // --- Bukan command: rekam sebagai sample gaya ketikan ---
         if (text) {
             const config = loadConfig();
-            const isGroup = fromJid.endsWith('@g.us');
             const senderJid = isGroup ? (msg.key.participant || fromJid) : fromJid;
             if (isGroup || isAuthorized(config, fromJid)) {
                 recordSample(senderJid, text);
