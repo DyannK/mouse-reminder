@@ -22,7 +22,7 @@ function resolveTargetsToJids(config, targetNames) {
 }
 
 /**
- * Parse input pesan buat /editpesan. Kalau diawali "AI:", wajib ada fallback manual
+ * Parse input pesan buat /editpesan atau /editpesannow. Kalau diawali "AI:", wajib ada fallback manual
  * dipisah "|", karena AI bisa gagal (server overload dll) dan reminder tetap harus
  * punya teks yang jelas buat dikirim.
  * Format: "AI: <tema> | <fallback manual>"  ATAU  teks biasa (literal, gak perlu fallback).
@@ -92,7 +92,7 @@ Setelah tersimpan, nama itu bisa dipakai sebagai target reminder, contoh: /tamba
 
 *Command terkait:*
 /listkontak → lihat semua kontak tersimpan
-/hapuskontak <nama> → hapus kontak, contoh: /hapuskontak budi`;
+/hapuskontak <nama> → delete kontak, contoh: /hapuskontak budi`;
 
 const HELP_REMINDER = `⏰ *Command Atur Reminder*
 
@@ -124,15 +124,17 @@ Kalau mau AI-generated, pakai /editpesan setelah reminder dibuat (lihat /help ai
 *Ubah reminder yang sudah ada:*
 /editjadwal <id> <jadwal baru> → khusus reminder berulang
 /editdeadline <id> | <tanggal> | <judul> | <milestone> | <target> → khusus deadline, isi "-" di bagian yang gak mau diubah
-/editpesan <id> <pesan baru> → berlaku kedua tipe, boleh pakai {sisa} dan {judul}
+/editpesan <id> <pesan baru> → ubah pesan pengingat menjelang waktu target (berlaku kedua tipe)
+/editpesannow <id> <pesan baru> → khusus deadline, ubah pesan tepat di waktu target utama saat jam H tiba
+
+💡 *Kenapa pesan target utama dipisah?*
+Sebab framing kalimat saat waktu target tiba bersifat eksekusi aktif atau pengumuman acara dimulai sekarang juga. Ini sangat berbeda dengan pesan pengingat menjelang yang bahasanya bermakna hitung mundur atau persiapan.
+
 /editjitter <id> <detik> → khusus reminder berulang, default 15 detik
 
 *Lihat & hapus (berlaku utk kedua tipe):*
 /list → lihat semua reminder aktif
-/hapus <id> → hapus satu reminder
-
-Contoh /editdeadline (cuma ganti judul & target, tanggal+milestone tetap):
-/editdeadline meeting | - | Meeting klien (revisi) | - | group,budi`;
+/hapus <id> → hapus satu reminder`;
 
 const HELP_AI = `🧠 *Teks Otomatis Pakai AI (Gratis)*
 
@@ -332,6 +334,8 @@ async function handleCommand(sock, text, fromJid, rebuildSchedules) {
             judul,
             message: `⏰ {sisa} menuju "{judul}"!`,
             manualFallback: null,
+            nowMessage: `🔔 Sekarang waktunya "{judul}"!`, // Inisialisasi default agar tidak kosong
+            nowManualFallback: null,
             milestones: milestoneResult.milestones,
             firedMilestones: [],
             pendingAITexts: {},
@@ -346,7 +350,6 @@ async function handleCommand(sock, text, fromJid, rebuildSchedules) {
         });
 
     } else if (command === '/editdeadline') {
-        // format: /editdeadline <id> | <tanggal atau -> | <judul atau -> | <milestone atau -> | <target atau ->
         const rest = text.substring('/editdeadline'.length).trim();
         const segments = rest.split('|').map(s => s.trim());
         const id = segments[0];
@@ -405,7 +408,6 @@ async function handleCommand(sock, text, fromJid, rebuildSchedules) {
         }
 
         if (jadwalBerubah) {
-            // jadwal/milestone berubah -> semua milestone dianggap "belum terkirim" lagi
             reminder.firedMilestones = [];
             reminder.pendingAITexts = {};
         }
@@ -434,7 +436,7 @@ async function handleCommand(sock, text, fromJid, rebuildSchedules) {
             return;
         }
         reminder.cronPattern = result.cronPattern;
-        reminder.pendingAIText = null; // jadwal berubah, teks pre-generate lama gak relevan lagi
+        reminder.pendingAIText = null;
         saveConfig(config);
         rebuildSchedules();
         await sock.sendMessage(fromJid, { text: `✅ Jadwal "${id}" jadi: ${formatCronKeTeks(result.cronPattern)}` });
@@ -459,6 +461,30 @@ async function handleCommand(sock, text, fromJid, rebuildSchedules) {
         saveConfig(config);
         const isAI = result.message.startsWith('AI:');
         await sock.sendMessage(fromJid, { text: `✅ Pesan "${id}" diubah.${isAI ? '\nMode: AI-generated (fallback manual tersimpan kalau AI gagal).' : ''}` });
+
+    } else if (command === '/editpesannow') {
+        const id = parts[1];
+        const rawPesan = text.substring(('/editpesannow ' + id).length).trim();
+        const reminder = config.reminders.find(r => r.id === id);
+        if (!reminder) {
+            await sock.sendMessage(fromJid, { text: `❌ Reminder "${id}" gak ditemukan.` });
+            return;
+        }
+        if (reminder.type !== 'deadline') {
+            await sock.sendMessage(fromJid, { text: `❌ "${id}" bukan tipe deadline reminder. Perintah /editpesannow cuma berlaku buat waktu target utama deadline.` });
+            return;
+        }
+        const result = parsePesanInput(rawPesan);
+        if (result.error) {
+            await sock.sendMessage(fromJid, { text: `❌ ${result.error}` });
+            return;
+        }
+        reminder.nowMessage = result.message;
+        reminder.nowManualFallback = result.manualFallback;
+        if (reminder.pendingAITexts) reminder.pendingAITexts = {};
+        saveConfig(config);
+        const isAI = result.message.startsWith('AI:');
+        await sock.sendMessage(fromJid, { text: `✅ Pesan target utama "${id}" diubah.${isAI ? '\nMode: AI-generated (fallback manual tersimpan kalau AI gagal).' : ''}` });
 
     } else if (command === '/editjitter') {
         const id = parts[1];

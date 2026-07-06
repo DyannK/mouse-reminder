@@ -1,4 +1,4 @@
-const { loadConfig, saveConfig } = require('./configManager');
+const { loadConfig, saveConfigDebounced } = require('./configManager');
 
 const MAX_SAMPLES = 30;
 const EMOJI_REGEX = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
@@ -14,7 +14,8 @@ function recordSample(jid, text) {
     if (config.styleProfiles[jid].samples.length > MAX_SAMPLES) {
         config.styleProfiles[jid].samples.shift(); // buang yang paling lama, biar tetap "gaya terkini"
     }
-    saveConfig(config);
+    // Menggunakan penyimpanan berkala agar tidak membebani performa prosesor saat grup ramai
+    saveConfigDebounced(config);
 }
 
 /** Set deskripsi gaya manual (seed awal), lewat command /gayaketik. */
