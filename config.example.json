@@ -32,5 +32,13 @@
       "mediaType": null,
       "teamTracking": {}
     }
+  ],
+  "telegramApiId": 0,
+  "telegramApiHash": "API_HASH_TELEGRAM",
+  "telegramPhoneNumber": "628xxxxxxxxxx",
+  "telegramSessionStr": "",
+  "telegramTargetGroups": [
+    "GROUP_NAME_Telegram_A",
+    "-1001234567890"
   ]
 }

@@ -12,6 +12,7 @@ const { generateAIText, generateTagReply, parseIntentFromText } = require('./gem
 const { computeTriggerTimestamp, milestoneKey } = require('./deadlineParser');
 const { computeNextCronFire, formatCronKeTeks } = require('./timeParser');
 const { recordSample, buildStyleInstruction } = require('./styleProfiler');
+const { initTelegramScraper } = require('./telegramScraper');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
@@ -327,6 +328,7 @@ async function startBot() {
         } else if (connection === 'open') {
             botJidNumber = sock.user.id.split(':')[0];
             setupSchedules(sock);
+            await initTelegramScraper(sock);
             rl.close();
         }
     });
