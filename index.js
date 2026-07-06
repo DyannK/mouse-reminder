@@ -440,6 +440,7 @@ async function startBot() {
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
         let config = loadConfig();
+        const samples = config.styleProfiles?.[fromJid]?.samples || [];
 
         if (isGroup && text) {
             logGroupMessage(senderName, text);
