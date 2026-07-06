@@ -14,9 +14,10 @@ const { recordSample, buildStyleInstruction } = require('./styleProfiler');
 const { initTelegramScraper } = require('./telegramScraper');
 
 const { logGroupMessage, getGroupLogs } = require('./chatLogger');
-const { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
+const { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, generateDynamicStateText, summarizeChatLog } = require('./geminiClient');
 
 const userStates = {};
+const chatMemory = {};
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
@@ -24,6 +25,12 @@ const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 let scheduledTasks = [];
 let botJidNumber = null;
 let isCheckingDeadlines = false;
+
+function pushToMemory(jid, sender, text) {
+    if (!chatMemory[jid]) chatMemory[jid] = [];
+    chatMemory[jid].push(`${sender}: ${text}`);
+    if (chatMemory[jid].length > 12) chatMemory[jid].shift();
+}
 
 function resetState(jid) {
     if (userStates[jid]?.timer) clearTimeout(userStates[jid].timer);
@@ -42,25 +49,24 @@ function setState(jid, mode, data = {}) {
     };
 }
 
-// FORMATTER POTONGAN NAMA PANGGILAN DINAMIS KHUSUS TONGKRONGAN
 function getNick(jid, pushName, config) {
     const nameMap = {
-        'dyan': 'Yan',
-        'medista': 'Med',
-        'fizar': 'Zar',
-        'prayoga': 'Yog',
-        'helmi': 'Hel',
-        'azanta': 'Zan'
+        'dyan': 'yan',
+        'medista': 'med',
+        'fizar': 'zar',
+        'prayoga': 'yog',
+        'helmi': 'hel',
+        'azanta': 'zan'
     };
     let mappedName = config.accountMapping[jid];
-    if (!mappedName && jid === config.ownerJid) mappedName = 'Dyan';
-    if (!mappedName) mappedName = pushName || 'Coy';
+    if (!mappedName && jid === config.ownerJid) mappedName = 'dyan';
+    if (!mappedName) mappedName = pushName || 'coy';
     
     const lowName = mappedName.toLowerCase();
     for (const [key, val] of Object.entries(nameMap)) {
         if (lowName.includes(key)) return val;
     }
-    return mappedName.slice(0, 3);
+    return lowName.slice(0, 3);
 }
 
 function getJakartaDateComponents(baseDate = new Date()) {
@@ -122,18 +128,18 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
     const config = loadConfig();
     const isGroup = fromJid.endsWith('@g.us');
     
-    let targetName = 'Pribadi (Gue)';
+    let targetName = 'pribadi (gue)';
     if (data.extractedTarget) {
         const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
-        if (foundContact) targetName = `Personal ke Nomor ${foundContact.name} (${foundContact.jid.split('@')[0]})`;
-        else targetName = `Personal ke ${data.extractedTarget} (Belum ada di daftar kontak)`;
+        if (foundContact) targetName = `personal ke nomor ${foundContact.name.toLowerCase()} (${foundContact.jid.split('@')[0]})`;
+        else targetName = `personal ke ${data.extractedTarget.toLowerCase()} (belum ada di daftar kontak)`;
     } else if (isGroup) {
         try {
             const metadata = await sock.groupMetadata(fromJid);
             const memberNames = metadata.participants.map(p => config.accountMapping[p.id] || p.id.split('@')[0]);
-            targetName = `Kelompok di Grup ini (Anggota: ${memberNames.slice(0, 6).join(', ')}${memberNames.length > 6 ? '... dan lainnya' : ''})`;
+            targetName = `kelompok di grup ini (anggota: ${memberNames.slice(0, 6).join(', ').toLowerCase()}${memberNames.length > 6 ? '... dan lainnya' : ''})`;
         } catch {
-            targetName = `Kelompok Kelompok`;
+            targetName = `kelompok kelompok`;
         }
     }
 
@@ -141,29 +147,29 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
     const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
 
     let confirmationText = `📋 *[KONFIRMASI AGENDA]*\n` +
-        `• *Judul Aktivitas*: ${data.judul || 'Agenda Kasual'}\n` +
-        `• *Waktu Sasaran*: Jam ${data.waktu || 'Belum diset'} WIB\n` +
-        `• *Target Penerima*: ${targetName}\n` +
-        `• *Skema Alarm*: ${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)\n` +
-        `• *Template Durasi (Mundur)*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
-        `• *Template Eksekusi (Sekarang)*: "${data.pesanNow || `sekarang waktunya {judul} coy!`}"\n\n` +
-        `📝 *Sistem Pengubah Parameter Diterima*:\n` +
-        `Lu bisa ketik kalimat kasual untuk mengubah manifes di atas secara langsung. Contoh:\n` +
+        `• *judul aktivitas*: ${data.judul || 'agenda kasual'}\n` +
+        `• *waktu sasaran*: jam ${data.waktu || 'belum diset'} wib\n` +
+        `• *target penerima*: ${targetName}\n` +
+        `• *skema alarm*: ${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)\n` +
+        `• *template durasi (mundur)*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
+        `• *template eksekusi (sekarang)*: "${data.pesanNow || `sekarang waktunya {judul} coy!`}"\n\n` +
+        `📝 *sistem pengubah parameter diterima*:\n` +
+        `lu bisa ketik kalimat kasual untuk mengubah manifes di atas secara langsung. contoh:\n` +
         `- _"ganti judul jadi rapat kelompok"_\n` +
         `- _"ganti jam jadi 15:45"_\n` +
-        `- _"ganti pesan durasi jadi AI:ingetin santai bray"_\n` +
+        `- _"ganti pesan durasi jadi ai:ingetin santai bray"_\n` +
         `- _"ganti pesan sekarang jadi bray buruan kumpul"_\n` +
         `- _"ganti interval jadi 5 menit"_\n\n` +
-        `Balas *IYA* untuk mengunci memori dan menyimpan agenda ini.`;
+        `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
 
-    await sock.sendMessage(fromJid, { text: confirmationText }, { quoted: quotedMsg });
+    await sock.sendMessage(fromJid, { text: confirmationText.toLowerCase() }, { quoted: msg });
 }
 
 function translateCronToHuman(cronPattern) {
     const parts = cronPattern.split(' ');
     if (parts.length !== 5) return cronPattern;
     const [min, hour, date, month, day] = parts;
-    let desc = 'Berjalan';
+    let desc = 'berjalan';
     if (min === '*' && hour === '*') desc += ' setiap menit';
     else if (min.startsWith('*/') && hour === '*') desc += ` kelipatan ${min.split('/')[1]} menit`;
     else desc += ` setiap jam ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
@@ -171,10 +177,10 @@ function translateCronToHuman(cronPattern) {
     if (date !== '*') desc += ` pada tanggal ${date}`;
     if (month !== '*') desc += ` di bulan ke-${month}`;
     if (day !== '*') {
-        const daysArr = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+        const daysArr = ['minggu', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu'];
         desc += ` setiap hari ${daysArr[parseInt(day, 10)] || day}`;
     }
-    return desc;
+    return desc.toLowerCase();
 }
 
 async function handleListDetail(sock, fromJid) {
@@ -191,7 +197,7 @@ async function handleListDetail(sock, fromJid) {
         msg += `• scope: ${r.scope}\n`;
         if (r.targetTimestamp) {
             const d = new Date(r.targetTimestamp);
-            msg += `• waktu: ${d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB\n`;
+            msg += `• waktu: ${d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} wib\n`;
         }
         if (r.cronPattern) msg += `• aturan pengulangan: ${translateCronToHuman(r.cronPattern)}\n`;
         msg += `• template durasi: "${r.message}"\n`;
@@ -205,7 +211,7 @@ async function handleListDetail(sock, fromJid) {
         if (r.mediaPath) msg += `• berkas media: ${path.basename(r.mediaPath)}\n`;
         msg += `-------------------------------------------\n`;
     });
-    await sock.sendMessage(fromJid, { text: msg.trim() });
+    await sock.sendMessage(fromJid, { text: msg.trim().toLowerCase() });
 }
 
 async function resolveTemplateForJid(messageTemplate, manualFallback, jid, context = {}, formal = false) {
@@ -217,7 +223,7 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
     let text = messageTemplate || '';
     if (context.sisa) text = text.replace(/{sisa}/g, context.sisa);
     if (context.judul) text = text.replace(/{judul}/g, context.judul);
-    return { text, usedFallback: false };
+    return { text: text.toLowerCase(), usedFallback: false };
 }
 
 async function deliverToJids(sock, reminder, targetTextMap) {
@@ -304,7 +310,7 @@ async function generateAndSendTeamReport(sock, reminder, config) {
         if (!data.active) report += `- ${name}\n`;
     });
 
-    await sock.sendMessage(config.groupJid, { text: report.trim() });
+    await sock.sendMessage(config.groupJid, { text: report.trim().toLowerCase() });
 }
 
 async function checkDeadlines(sock) {
@@ -434,7 +440,7 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
 
         saveConfig(config);
         setupSchedules(sock);
-        await sock.sendMessage(fromJid, { text: 'siap, media sama caption udah gue gabungin ke pengingat pribadi lu.' }, { quoted: msg });
+        await sock.sendMessage(fromJid, { text: 'siap media sama caption udah gue gabungin ke pengingat pribadi lu bray' });
     } catch (err) {
         console.error('gagal olah media:', err);
     }
@@ -478,6 +484,10 @@ async function startBot() {
             logGroupMessage(senderName, text);
         }
 
+        if (text) {
+            pushToMemory(fromJid, currentNick, text);
+        }
+
         // 1. GERBANG MANUAL UTAMA (SLASH INTERCEPTOR)
         if (text.startsWith('/')) {
             resetState(fromJid);
@@ -488,20 +498,20 @@ async function startBot() {
                     `📌 *PENGELOLAAN AGENDA MANUAL*\n` +
                     `• */tambah [Menit] [Jam] [Tgl] [Bulan] [Hari] | [Pesan]*\n` +
                     `  _Definisi_: Membuat pengingat alarm rutin jangka panjang.\n` +
-                    `  _Contoh_: \`/tambah 0 7 * * * | bangun bray, kuliah!\`\n\n` +
+                    `  _Contoh_: \`/tambah 0 7 * * * | bangun bray kuliah\`\n\n` +
                     `• */tambahdeadline [DD-MM-YYYY HH:MM] | [Judul] | [Milestones]*\n` +
                     `  _Definisi_: Membuat target deadline satu kali eksekusi.\n` +
-                    `  _Contoh_: \`/tambahdeadline 07-07-2026 13:00 | Uas Elka | 1hari,2jam\`\n\n` +
+                    `  _Contoh_: \`/tambahdeadline 07-07-2026 13:00 | uas elka | 1hari,2jam\`\n\n` +
                     `• */editpesan [id_agenda] [teks_template]*\n` +
                     `  _Definisi_: Mengubah isi teks pengingat durasi mundur.\n` +
-                    `  _Contoh_: \`/editpesan ai_1510 AI:ingetin waktu kurang {sisa}\`\n\n` +
+                    `  _Contoh_: \`/editpesan ai_1510 ai:ingetin waktu kurang {sisa}\`\n\n` +
                     `• */editpesannow [id_agenda] [teks_template]*\n` +
                     `  _Definisi_: Mengubah isi teks pengingat pas waktu eksekusi.\n` +
-                    `  _Contoh_: \`/editpesannow ai_1510 sekarang waktunya {judul}!\`\n\n` +
+                    `  _Contoh_: \`/editpesannow ai_1510 sekarang waktunya {judul}\`\n\n` +
                     `📌 *PENGATURAN PROFIL GAYA BAHASA*\n` +
                     `• */gayabicara [deskripsi_gaya]*\n` +
                     `  _Definisi_: Mengatur karakteristik ketikan lu secara manual di database.\n` +
-                    `  _Contoh_: \`/gayabicara Orangnya santai, wajib pakai gue lo, suka ketawa wkwk\`\n\n` +
+                    `  _Contoh_: \`/gayabicara orangnya santai wajib pakai gue lo suka ketawa wkwk\`\n\n` +
                     `📌 *PEMERIKSAAN & ANALISIS OBROLAN*\n` +
                     `• */list* : Menampilkan seluruh daftar agenda secara singkat.\n` +
                     `• */listdetail* : Membedah parameter isi database secara transparan.\n` +
@@ -509,7 +519,7 @@ async function startBot() {
                     `  _Definisi_: Merangkum sejarah chat grup menjadi poin ringkas.\n` +
                     `  _Contoh_: \`/rangkuman 200\``;
 
-                await sock.sendMessage(fromJid, { text: menuHelp }, { quoted: msg });
+                await sock.sendMessage(fromJid, { text: menuHelp.toLowerCase() }, { quoted: msg });
                 return;
             }
             if (cmd === '/listdetail') {
@@ -520,9 +530,9 @@ async function startBot() {
                 const bubbleCount = parseInt(cmd.replace('/rangkuman', '').trim(), 10) || 200;
                 const logs = getGroupLogs(bubbleCount);
                 if (logs.length === 0) {
-                    await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam bray.' });
+                    await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam bray' });
                 } else {
-                    await sock.sendMessage(fromJid, { text: 'bentar, gue rangkumin dulu ya...' });
+                    await sock.sendMessage(fromJid, { text: 'bentar gue rangkumin dulu ya' });
                     const summary = await summarizeChatLog(logs);
                     await sock.sendMessage(fromJid, { text: summary });
                 }
@@ -534,7 +544,7 @@ async function startBot() {
                 const pattern = parts[0].trim();
                 const pesan = parts[1].trim();
                 const humanDesc = translateCronToHuman(pattern);
-                await sock.sendMessage(fromJid, { text: `📋 *[VERIFIKASI MANUAL BACKEND]*\nSistem menerjemahkan perintah manual lu:\n• Tipe: Rutin Berulang\n• Pola Kerja: ${humanDesc}\n• Muatan Pesan: "${pesan}"\n\nAgenda langsung diamankan ke scheduler.` });
+                await sock.sendMessage(fromJid, { text: `📋 *[VERIFIKASI MANUAL BACKEND]*\nsistem menerjemahkan perintah manual lu:\n• tipe: rutin berulang\n• pola kerja: ${humanDesc}\n• muatan pesan: "${pesan}"\n\nagenda langsung diamankan ke scheduler.` });
             }
 
             await handleCommand(sock, text, fromJid, () => setupSchedules(sock));
@@ -547,7 +557,7 @@ async function startBot() {
             return;
         }
 
-        // 3. JALUR PELACAKAN AKTIVITAS TIM KELOMPOK DENGAN BALASAN PENUTUP AI
+        // 3. JALUR PELACAKAN AKTIVITAS TIM KELOMPOK DENGAN BALASAN PENUTUP DYNAMIC AI MEMORY
         if (!isGroup) {
             let tracked = false;
             config.reminders.forEach(r => {
@@ -558,7 +568,8 @@ async function startBot() {
             });
             if (tracked) {
                 saveConfig(config);
-                const aiReply = await generateMimicReply(text, samples);
+                const aiReply = await generateMimicReply(text, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', aiReply);
                 await sock.sendMessage(fromJid, { text: aiReply }, { quoted: msg });
                 return;
             }
@@ -566,13 +577,15 @@ async function startBot() {
 
         const lowText = text.trim().toLowerCase();
 
-        // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN (NICKNAME MATCH)
+        // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
             const state = userStates[fromJid];
             
             if (['gajadi', 'batal', 'cancel', 'ntar aja'].some(w => lowText.includes(w))) {
                 resetState(fromJid);
-                await sock.sendMessage(fromJid, { text: `oke bray, pembuatan jadwal dibatalin ya ${currentNick}.` }, { quoted: msg });
+                const reply = await generateDynamicStateText(`oke bray pembuatan jadwal dibatalin ya ${currentNick}`, currentNick, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', reply);
+                await sock.sendMessage(fromJid, { text: reply }, { quoted: msg });
                 return;
             }
 
@@ -620,7 +633,6 @@ async function startBot() {
                 return;
             }
 
-            // KAMUS REGEX ISYES DIPERLUAS MENGAKOMODASI IYE / IYEE / YEE
             const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
             const isChat = /\b(chatan|ngobrol|chat|basa basi)\b/i.test(lowText) || lowText.includes('chatan');
 
@@ -659,11 +671,11 @@ async function startBot() {
                     type: 'deadline',
                     scope: finalScope,
                     targetTimestamp: targetTimestamp,
-                    judul: data.judul || 'Agenda Kasual',
+                    judul: data.judul || 'agenda kasual',
                     message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
-                    manualFallback: data.judul || 'Agenda Kasual',
-                    nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'Agenda Kasual'} coy!`,
-                    nowManualFallback: data.judul || 'Agenda Kasual',
+                    manualFallback: data.judul || 'agenda kasual',
+                    nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
+                    nowManualFallback: data.judul || 'agenda kasual',
                     milestones: finalMilestones,
                     firedMilestones: [],
                     pendingAITexts: {},
@@ -677,12 +689,18 @@ async function startBot() {
                 resetState(fromJid);
                 setupSchedules(sock);
                 
-                await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}.` });
+                const reply = await generateDynamicStateText(`jadwal udah gue simpen permanen ya ${currentNick}`, currentNick, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', reply);
+                await sock.sendMessage(fromJid, { text: reply });
             } else if (isChat) {
                 setState(fromJid, 'chat');
-                await sock.sendMessage(fromJid, { text: 'oke gas, mau ngobrolin apaan nih?' });
+                const reply = await generateDynamicStateText(`oke gas mau ngobrolin apaan nih ${currentNick}`, currentNick, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', reply);
+                await sock.sendMessage(fromJid, { text: reply });
             } else {
-                await sock.sendMessage(fromJid, { text: `mau lanjut chatan aja, atau fix buat agenda nih? balas iya atau chatan ${currentNick}` });
+                const reply = await generateDynamicStateText(`mau lanjut chatan aja atau fix buat agenda nih? balas iya atau chatan ${currentNick}`, currentNick, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', reply);
+                await sock.sendMessage(fromJid, { text: reply });
             }
             return;
         }
@@ -702,13 +720,19 @@ async function startBot() {
                     setState(fromJid, 'confirm_schedule', state.data.originalData);
                     await sendDetailedConfirmation(sock, fromJid, state.data.originalData, msg);
                 } else {
-                    await sock.sendMessage(fromJid, { text: `masih kebanyakan bray (${testMilestones.length} kali). gempor gue gila, coba gedein lagi menit atau jamnya.` });
+                    const reply = await generateDynamicStateText(`masih kebanyakan bray (${testMilestones.length} kali) gempor gue gila coba gedein lagi menit atau jamnya`, currentNick, samples, chatMemory[fromJid] || []);
+                    pushToMemory(fromJid, 'bot', reply);
+                    await sock.sendMessage(fromJid, { text: reply });
                 }
             } else if (['gajadi', 'batal', 'cancel'].some(w => lowText.includes(w))) {
                 resetState(fromJid);
-                await sock.sendMessage(fromJid, { text: 'oke sip, gue reset.' });
+                const reply = await generateDynamicStateText(`oke sip gue reset`, currentNick, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', reply);
+                await sock.sendMessage(fromJid, { text: reply });
             } else {
-                await sock.sendMessage(fromJid, { text: 'coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit atau berapa jam?' });
+                const reply = await generateDynamicStateText(`coba benerin lagi maksud lu gimana mau diganti tiap berapa menit atau berapa jam`, currentNick, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', reply);
+                await sock.sendMessage(fromJid, { text: reply });
             }
             return;
         }
@@ -719,7 +743,7 @@ async function startBot() {
 
         if (!isGroup || isBotMentioned) {
             if (!isGroup && !isAuthorized(config, fromJid)) {
-                await sock.sendMessage(fromJid, { text: 'akses terbatas. daftar pake /daftar dulu cuy.' });
+                await sock.sendMessage(fromJid, { text: 'akses terbatas daftar pake /daftar dulu cuy' });
                 return;
             }
 
@@ -730,7 +754,9 @@ async function startBot() {
                 
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
-                    await sock.sendMessage(fromJid, { text: `ini yakin gue ngingetin ${calculated.length} kali? gempor gue gila bray, peladen bisa meledak. coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit?` });
+                    const reply = await generateDynamicStateText(`ini yakin gue ngingetin ${calculated.length} kali? gempor gue gila bray, peladen bisa meledak. coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit?`, currentNick, samples, chatMemory[fromJid] || []);
+                    pushToMemory(fromJid, 'bot', reply);
+                    await sock.sendMessage(fromJid, { text: reply });
                     return;
                 }
 
@@ -740,9 +766,9 @@ async function startBot() {
             } else if (intentData.intent === 'summarize') {
                 const logs = getGroupLogs(intentData.jumlahChat || 200);
                 if (logs.length === 0) {
-                    await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam nih coy.' });
+                    await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam nih coy' });
                 } else {
-                    await sock.sendMessage(fromJid, { text: 'bentar, gue rangkumin dulu ya...' });
+                    await sock.sendMessage(fromJid, { text: 'bentar gue baca baca dulu ya' });
                     const summary = await summarizeChatLog(logs);
                     await sock.sendMessage(fromJid, { text: summary });
                 }
@@ -759,13 +785,14 @@ async function startBot() {
                 if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke'].some(w => lowText === w || lowText.includes(w))) {
                     if (userStates[fromJid] && userStates[fromJid].mode === 'chat') {
                         resetState(fromJid);
-                        await sock.sendMessage(fromJid, { text: `oke siap, obrolan gue tutup ya bray ${currentNick}.` }, { quoted: msg });
+                        await sock.sendMessage(fromJid, { text: `oke siap obrolan gue tutup ya bray ${currentNick}` }, { quoted: msg });
                         return;
                     }
                 }
 
                 setState(fromJid, 'chat');
-                const reply = await generateMimicReply(text, samples);
+                const reply = await generateMimicReply(text, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', reply);
                 await sock.sendMessage(fromJid, { text: reply }, { quoted: msg });
             }
         }

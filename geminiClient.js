@@ -102,7 +102,7 @@ async function callAIWithHybridRotation(prompt, isJson = false, systemInstructio
 }
 
 function buildGayaInstruction() {
-    return 'gaya bahasa wajib sangat santai, natural, mengalir seperti chat sehari-hari. gunakan huruf kecil di awal kalimat agar terasa manusiawi, boleh pakai singkatan wajar, gunakan panggilan yang akrab, buang total struktur kaku.';
+    return 'gaya bahasa wajib menggunakan huruf kecil semua tanpa perkecualian, termasuk penulisan nama panggilan orang (yan, med, zar, yog). mengalir sangat santai natural seperti wa anak tongkrongan sehari-hari. dilarang keras menyisipkan tanda koma tepat sebelum panggilan nama (contoh salah: "apa, yan?", "halo, med". contoh benar: "apa yan", "halo med"). buang total atau kurangi penggunaan tanda baca berlebih atau lebay seperti !?, double tanda tanya, atau koma beruntun.';
 }
 
 async function generateAIText(tema, context = {}, styleInstruction = null, manualFallback = null, formal = false) {
@@ -115,9 +115,9 @@ async function generateAIText(tema, context = {}, styleInstruction = null, manua
     if (context.judul) prompt += ` judul agenda: ${context.judul}.`;
     
     const result = await callAIWithHybridRotation(prompt, false, buildGayaInstruction());
-    if (result.text) return { text: result.text, usedFallback: false };
+    if (result.text) return { text: result.text.toLowerCase(), usedFallback: false };
     
-    return { text: fallbackText, usedFallback: true };
+    return { text: fallbackText.toLowerCase(), usedFallback: true };
 }
 
 async function generateTagReply(triggerText, styleInstruction = null) {
@@ -125,7 +125,7 @@ async function generateTagReply(triggerText, styleInstruction = null) {
     if (styleInstruction) prompt += ` ${styleInstruction}`;
 
     const result = await callAIWithHybridRotation(prompt, false, buildGayaInstruction());
-    return result.text || 'oi, ada apa coy?';
+    return result.text ? result.text.toLowerCase() : 'oi ada apa yan';
 }
 
 async function parseIntentFromText(triggerText) {
@@ -187,16 +187,32 @@ format output json murni:
     }
 }
 
-async function generateMimicReply(triggerText, recentSamples) {
+async function generateMimicReply(triggerText, recentSamples, conversationHistory = []) {
     const system = `lu adalah temen nongkrong di wa.
 aturan mutlak:
-1. pakai gaya bahasa indonesia kasual banget, pakai gue/lu.
-2. perhatikan emosi pengguna: kalau dia pakai huruf berulang (guyyyss, apaaaa), huruf kapital untuk ngegas, atau singkatan alay, LU WAJIB NIRU vibe dan energinya persis kayak gitu.
-3. pelajari gaya ketikannya dari histori ini: ${recentSamples.join(' | ')}
-4. jangan pernah kayak robot, jawab sesingkat dan seasik mungkin.`;
+1. pakai gaya bahasa indonesia kasual banget, pakai gue/lu. wajib huruf kecil semua termasuk penulisan nama panggilan (yan, med, zar, yog).
+2. dilarang keras menyelipkan tanda koma tepat sebelum panggilan nama (contoh: "ada apa yan" bukan "ada apa, yan"). kurangi total tanda baca lebay atau tidak penting seperti !?, double tanya, atau rentetan koma.
+3. perhatikan emosi pengguna dan tiru karakteristik ketikannya dari profil ini: ${recentSamples.join(' | ')}
+4. lu wajib membaca runtunan riwayat percakapan sebelumnya agar jawaban lu mengakar, nyambung, dan memahami konteks pembicaraan dari bubble ke bubble sebelumnya secara akurat.`;
     
-    const result = await callAIWithHybridRotation(triggerText, false, system);
-    return result.text || 'waduh, otak gue ngeblank bentar coy.';
+    let prompt = `Riwayat percakapan terakhir lu dan user:\n${conversationHistory.join('\n')}\n\nUser baru saja mengetik pesan: "${triggerText}"\nBalas dengan mengalir dan mengakar sesuai konteks riwayat di atas:`;
+    
+    const result = await callAIWithHybridRotation(prompt, false, system);
+    return result.text ? result.text.toLowerCase() : 'waduh otak gue ngeblank bentar bray';
+}
+
+async function generateDynamicStateText(fallbackText, currentNick, samples, history = []) {
+    const system = `lu adalah asisten personal kasual di wa. tugas lu adalah mengubah pesan status operasional sistem menjadi untaian kalimat obrolan wa yang super natural.
+    aturan mutlak:
+    1. wajib huruf kecil semua tanpa terkecuali termasuk nama panggilan (yan, med, zar, yog).
+    2. jangan selipkan koma sebelum nama panggilan (contoh: "beres yan" bukan "beres, yan"). kurangi tanda baca berlebih (!?, koma lebay).
+    3. esensi operasional status harus tetap tersampaikan utuh dan jelas dari kalimat: "${fallbackText}".
+    4. sapa user menggunakan potongan nama panggilannya: "${currentNick}".
+    5. tiru karakteristik ketikan kasual user dari sampel berikut: ${samples.join(' | ')}`;
+    
+    let prompt = `Riwayat chat terakhir:\n${history.join('\n')}\n\nUbah status sistem berikut menjadi kalimat chat tongkrongan yang mengalir: "${fallbackText}"`;
+    const result = await callAIWithHybridRotation(prompt, false, system);
+    return result.text ? result.text.toLowerCase() : fallbackText.toLowerCase();
 }
 
 async function summarizeChatLog(logs) {
@@ -205,7 +221,7 @@ async function summarizeChatLog(logs) {
     const prompt = `rangkumin obrolan ini:\n${chatText}`;
     
     const result = await callAIWithHybridRotation(prompt, false, system);
-    return result.text || 'lagi ga bisa ngerangkum nih, kepanjangan kayaknya.';
+    return result.text || 'lagi ga bisa ngerangkum nih kepanjangan kayaknya';
 }
 
-module.exports = { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, summarizeChatLog };
+module.exports = { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, generateDynamicStateText, summarizeChatLog };
