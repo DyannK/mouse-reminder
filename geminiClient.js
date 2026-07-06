@@ -1,9 +1,8 @@
 const { loadConfig } = require('./configManager');
 
-let currentGeminiIndex = 0;
 let currentGroqIndex = 0;
 
-async function callGroq(prompt, config, systemInstruction) {
+async function callGroq(prompt, config, systemInstruction, isJson = false) {
     const keys = config.groqApiKeys || [];
     const model = 'llama-3.3-70b-versatile';
 
@@ -18,22 +17,31 @@ async function callGroq(prompt, config, systemInstruction) {
         const timeoutId = setTimeout(() => controller.abort(), 8000);
 
         try {
+            const body = {
+                model: model,
+                messages: [
+                    { role: 'system', content: systemInstruction },
+                    { role: 'user', content: prompt }
+                ],
+                temperature: isJson ? 0.1 : 0.8
+            };
+            
+            if (isJson) {
+                body.response_format = { type: 'json_object' };
+            }
+
             const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: model,
-                    messages: [
-                        { role: 'system', content: systemInstruction },
-                        { role: 'user', content: prompt }
-                    ],
-                    temperature: 0.8
-                }),
+                body: JSON.stringify(body),
                 signal: controller.signal
             });
 
             const data = await res.json();
-            if (!res.ok) continue;
+            if (!res.ok) {
+                console.error('eror groq:', data);
+                continue;
+            }
 
             const text = data?.choices?.[0]?.message?.content;
             if (text) {
@@ -41,7 +49,7 @@ async function callGroq(prompt, config, systemInstruction) {
                 return { text: text.trim() };
             }
         } catch (err) {
-            console.error(err.message);
+            console.error('jaringan groq:', err.message);
         } finally {
             clearTimeout(timeoutId);
         }
@@ -49,7 +57,6 @@ async function callGroq(prompt, config, systemInstruction) {
     return { text: null };
 }
 
-// MESIN EKSTRAKSI LOGIKA (Buta Emosi)
 async function parseIntentFromText(triggerText) {
     const system = `analisis kalimat untuk klasifikasi intent. keluarkan format JSON mentah tanpa markdown.
 intent bisa berupa: "create_schedule", "read_schedule", "summarize", "chat".
@@ -59,39 +66,41 @@ aturan:
 
 format json:
 {
-  "intent": string,
-  "judul": string atau null,
-  "waktu": string "HH:MM" atau null,
-  "jumlahChat": number (jika intent summarize, tangkap angkanya, default 200)
+  "intent": "string",
+  "judul": "string atau null",
+  "waktu": "string 'HH:MM' atau null",
+  "jumlahChat": 200
 }`;
-    const result = await callGroq(triggerText, loadConfig(), system);
+    
+    const result = await callGroq(triggerText, loadConfig(), system, true);
+    if (!result.text) return { intent: 'chat' };
+    
     try {
         return JSON.parse(result.text.replace(/```json|```/gi, '').trim());
-    } catch {
+    } catch (err) {
+        console.error('gagal urai json:', err.message, 'teks mentah:', result.text);
         return { intent: 'chat' };
     }
 }
 
-// MESIN PENIRU EMOSI (Mimicking)
 async function generateMimicReply(triggerText, recentSamples) {
-    const system = `lu adalah temen nongkrong di WA.
+    const system = `lu adalah temen nongkrong di wa.
 aturan mutlak:
 1. pakai gaya bahasa indonesia kasual banget, pakai gue/lu.
-2. PERHATIKAN EMOSI PENGGUNA: kalau dia pakai huruf berulang ("guyyyss", "apaaaa"), huruf kapital untuk ngegas, atau singkatan alay, LU WAJIB NIRU vibe dan energinya persis kayak gitu.
+2. perhatikan emosi pengguna: kalau dia pakai huruf berulang (guyyyss, apaaaa), huruf kapital untuk ngegas, atau singkatan alay, LU WAJIB NIRU vibe dan energinya persis kayak gitu.
 3. pelajari gaya ketikannya dari histori ini: ${recentSamples.join(' | ')}
 4. jangan pernah kayak robot, jawab sesingkat dan seasik mungkin.`;
     
-    const result = await callGroq(triggerText, loadConfig(), system);
+    const result = await callGroq(triggerText, loadConfig(), system, false);
     return result.text || 'waduh, otak gue ngeblank bentar coy.';
 }
 
-// MESIN RANGKUMAN
 async function summarizeChatLog(logs) {
     const chatText = logs.map(l => `${l.senderName}: ${l.text}`).join('\n');
-    const system = `lu adalah perangkum tongkrongan. baca log chat berikut dan rangkum poin pentingnya pakai dots (bullet). bahasanya tetap santai dan asik, pakai kata gue/lu.`;
+    const system = `lu adalah perangkum tongkrongan. baca log chat berikut dan rangkum poin pentingnya. bahasanya tetap santai dan asik, pakai kata gue/lu.`;
     const prompt = `rangkumin obrolan ini:\n${chatText}`;
     
-    const result = await callGroq(prompt, loadConfig(), system);
+    const result = await callGroq(prompt, loadConfig(), system, false);
     return result.text || 'lagi ga bisa ngerangkum nih, kepanjangan kayaknya.';
 }
 
