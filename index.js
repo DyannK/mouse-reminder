@@ -14,7 +14,7 @@ const { recordSample, buildStyleInstruction } = require('./styleProfiler');
 const { initTelegramScraper } = require('./telegramScraper');
 
 const { logGroupMessage, getGroupLogs } = require('./chatLogger');
-const { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, generateCasualStateReply, summarizeChatLog } = require('./geminiClient');
+const { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
 
 const userStates = {};
 
@@ -42,7 +42,6 @@ function setState(jid, mode, data = {}) {
     };
 }
 
-// HELPER NORMALISASI JAM DAN TANGGAL BERBASIS ASIA/JAKARTA (TIMEZONE INDEPENDENT)
 function getJakartaDateComponents(baseDate = new Date()) {
     const formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: 'Asia/Jakarta',
@@ -53,7 +52,6 @@ function getJakartaDateComponents(baseDate = new Date()) {
     return Object.fromEntries(parts.map(p => [p.type, p.value]));
 }
 
-// KALKULATOR MATEMATIKA DERET MUNDUR MILESTONES INTERVAL (TIMEZONE-SAFE)
 function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin) {
     if (!waktuTarget || !waktuTarget.includes(':')) {
         return [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }];
@@ -99,7 +97,6 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin) {
     return milestones.sort((a, b) => b.totalMinutes - a.totalMinutes);
 }
 
-// ARSITEKTUR PANEL KONFIRMASI TRANS-BAHASA MANUSIA SUPER DETAIL
 async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
     const config = loadConfig();
     const isGroup = fromJid.endsWith('@g.us');
@@ -127,19 +124,20 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
         `• *Waktu Sasaran*: Jam ${data.waktu || 'Belum diset'} WIB\n` +
         `• *Target Penerima*: ${targetName}\n` +
         `• *Skema Alarm*: ${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)\n` +
-        `• *Muatan Isi Pesan*: "${data.pesan || `waktunya {judul} bentar lagi nih!`}"\n\n` +
+        `• *Template Durasi (Mundur)*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
+        `• *Template Eksekusi (Sekarang)*: "${data.pesanNow || `sekarang waktunya {judul} coy!`}"\n\n` +
         `📝 *Sistem Pengubah Parameter Diterima*:\n` +
-        `Lu bisa langsung ketik kalimat kasual untuk mengubah manifes di atas secara langsung. Contoh:\n` +
+        `Lu bisa ketik kalimat kasual untuk mengubah manifes di atas secara langsung. Contoh:\n` +
         `- _"ganti judul jadi rapat kelompok"_\n` +
         `- _"ganti jam jadi 15:45"_\n` +
-        `- _"ganti pesan jadi kumpul bray"_\n` +
+        `- _"ganti pesan durasi jadi AI:ingetin santai bray"_\n` +
+        `- _"ganti pesan sekarang jadi bray buruan kumpul"_\n` +
         `- _"ganti interval jadi 5 menit"_\n\n` +
         `Balas *IYA* untuk mengunci memori dan menyimpan agenda ini.`;
 
     await sock.sendMessage(fromJid, { text: confirmationText }, { quoted: quotedMsg });
 }
 
-// DEKODER FORMULASI MANUSIA UNTUK CRON PATTERN
 function translateCronToHuman(cronPattern) {
     const parts = cronPattern.split(' ');
     if (parts.length !== 5) return cronPattern;
@@ -158,7 +156,6 @@ function translateCronToHuman(cronPattern) {
     return desc;
 }
 
-// FORMAT PARSER DETAIL INTERNAL JADWAL DATABASE (CLEAN FROM RAW CRON)
 async function handleListDetail(sock, fromJid) {
     const config = loadConfig();
     const reminders = config.reminders || [];
@@ -176,7 +173,8 @@ async function handleListDetail(sock, fromJid) {
             msg += `• waktu: ${d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB\n`;
         }
         if (r.cronPattern) msg += `• aturan pengulangan: ${translateCronToHuman(r.cronPattern)}\n`;
-        msg += `• template: "${r.message}"\n`;
+        msg += `• template durasi: "${r.message}"\n`;
+        msg += `• template eksekusi: "${r.nowMessage || '-'}"\n`;
         if (r.milestones && r.milestones.length > 0) {
             msg += `• milestones:\n`;
             r.milestones.forEach(m => {
@@ -187,6 +185,18 @@ async function handleListDetail(sock, fromJid) {
         msg += `-------------------------------------------\n`;
     });
     await sock.sendMessage(fromJid, { text: msg.trim() });
+}
+
+async function resolveTemplateForJid(messageTemplate, manualFallback, jid, context = {}, formal = false) {
+    if ((messageTemplate || '').startsWith('AI:')) {
+        const tema = messageTemplate.replace('AI:', '').trim();
+        const styleInstruction = buildStyleInstruction(jid);
+        return await generateAIText(tema, context, styleInstruction, manualFallback, formal);
+    }
+    let text = messageTemplate || '';
+    if (context.sisa) text = text.replace(/{sisa}/g, context.sisa);
+    if (context.judul) text = text.replace(/{judul}/g, context.judul);
+    return { text, usedFallback: false };
 }
 
 async function deliverToJids(sock, reminder, targetTextMap) {
@@ -430,7 +440,6 @@ async function startBot() {
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
         let config = loadConfig();
-        const samples = config.styleProfiles?.[fromJid]?.samples || [];
 
         if (isGroup && text) {
             logGroupMessage(senderName, text);
@@ -459,7 +468,7 @@ async function startBot() {
                     `📌 *PENGATURAN PROFIL GAYA BAHASA*\n` +
                     `• */gayabicara [deskripsi_gaya]*\n` +
                     `  _Definisi_: Mengatur karakteristik ketikan lu secara manual di database.\n` +
-                    `  _Contoh_: \`/gayabicara orangnya santai, wajib pakai gue lo, suka ketawa wkwk\`\n\n` +
+                    `  _Contoh_: \`/gayabicara Orangnya santai, wajib pakai gue lo, suka ketawa wkwk\`\n\n` +
                     `📌 *PEMERIKSAAN & ANALISIS OBROLAN*\n` +
                     `• */list* : Menampilkan seluruh daftar agenda secara singkat.\n` +
                     `• */listdetail* : Membedah parameter isi database secara transparan.\n` +
@@ -523,14 +532,13 @@ async function startBot() {
 
         const lowText = text.trim().toLowerCase();
 
-        // 4. KONDISI LOCK INTERAKTIF: REKAYASA EDIT CASUAL DI TENGAH SESI KONFIRMASI (MIMIC REPLIES APPLIED)
+        // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
             const state = userStates[fromJid];
             
             if (['gajadi', 'batal', 'cancel', 'ntar aja'].some(w => lowText.includes(w))) {
                 resetState(fromJid);
-                const reply = await generateCasualStateReply('oke bray, pembuatan jadwal dibatalin ya.', samples);
-                await sock.sendMessage(fromJid, { text: reply }, { quoted: msg });
+                await sock.sendMessage(fromJid, { text: 'oke bray, pembuatan jadwal dibatalin ya.' }, { quoted: msg });
                 return;
             }
 
@@ -545,11 +553,18 @@ async function startBot() {
                 await sendDetailedConfirmation(sock, fromJid, state.data, msg);
                 return;
             }
-            if (/ganti pesan|ubah pesan|ganti isi|ubah isi/i.test(lowText)) {
-                state.data.pesan = text.replace(/ganti pesan jadi|ubah pesan jadi|ganti pesan|ubah pesan|ganti isi jadi|ubah isi jadi/gi, '').trim();
+            
+            if (/ganti pesan durasi|ubah pesan durasi|ganti template durasi/i.test(lowText)) {
+                state.data.pesanDurasi = text.replace(/ganti pesan durasi jadi|ubah pesan durasi jadi|ganti template durasi jadi|ganti pesan durasi|ubah pesan durasi/gi, '').trim();
                 await sendDetailedConfirmation(sock, fromJid, state.data, msg);
                 return;
             }
+            if (/ganti pesan sekarang|ubah pesan sekarang|ganti pesan eksekusi|ubah pesan eksekusi/i.test(lowText)) {
+                state.data.pesanNow = text.replace(/ganti pesan sekarang jadi|ubah pesan sekarang jadi|ganti pesan eksekusi jadi|ubah pesan eksekusi jadi|ganti pesan sekarang|ganti pesan eksekusi/gi, '').trim();
+                await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                return;
+            }
+
             if (/ganti interval|ubah interval|tiap|per/i.test(lowText)) {
                 const matchDigits = lowText.match(/\d+/);
                 if (matchDigits) {
@@ -610,9 +625,9 @@ async function startBot() {
                     scope: finalScope,
                     targetTimestamp: targetTimestamp,
                     judul: data.judul || 'Agenda Kasual',
-                    message: data.pesan || `waktunya {judul} bentar lagi nih!`,
+                    message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
                     manualFallback: data.judul || 'Agenda Kasual',
-                    nowMessage: `sekarang waktunya ${data.judul || 'Agenda Kasual'} coy!`,
+                    nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'Agenda Kasual'} coy!`,
                     nowManualFallback: data.judul || 'Agenda Kasual',
                     milestones: finalMilestones,
                     firedMilestones: [],
@@ -627,20 +642,17 @@ async function startBot() {
                 resetState(fromJid);
                 setupSchedules(sock);
                 
-                const reply = await generateCasualStateReply('jadwal udah gue simpen permanen ya coy.', samples);
-                await sock.sendMessage(fromJid, { text: reply });
+                await sock.sendMessage(fromJid, { text: 'jadwal udah gue simpen permanen ya coy.' });
             } else if (isChat) {
                 setState(fromJid, 'chat');
-                const reply = await generateCasualStateReply('oke gas, mau ngobrolin apaan nih?', samples);
-                await sock.sendMessage(fromJid, { text: reply });
+                await sock.sendMessage(fromJid, { text: 'oke gas, mau ngobrolin apaan nih?' });
             } else {
-                const reply = await generateCasualStateReply('mau lanjut chatan aja, atau fix buat agenda nih? balas iya atau chatan', samples);
-                await sock.sendMessage(fromJid, { text: reply });
+                await sock.sendMessage(fromJid, { text: 'mau lanjut chatan aja, atau fix buat agenda nih? balas iya atau chatan' });
             }
             return;
         }
 
-        // 5. INTERLOCK PEMBATALAN OVER-LIMIT DEBAT INTERAKTIF MILESTONES (MIMIC REPLIES APPLIED)
+        // 5. INTERLOCK PEMBATALAN OVER-LIMIT DEBAT INTERAKTIF MILESTONES
         if (userStates[fromJid] && userStates[fromJid].mode === 'interval_correction') {
             const state = userStates[fromJid];
             const matchDigits = lowText.match(/\d+/);
@@ -655,16 +667,13 @@ async function startBot() {
                     setState(fromJid, 'confirm_schedule', state.data.originalData);
                     await sendDetailedConfirmation(sock, fromJid, state.data.originalData, msg);
                 } else {
-                    const reply = await generateCasualStateReply(`masih kebanyakan bray (${testMilestones.length} kali). gempor gue gila, coba gedein lagi menit atau jamnya.`, samples);
-                    await sock.sendMessage(fromJid, { text: reply });
+                    await sock.sendMessage(fromJid, { text: `masih kebanyakan bray (${testMilestones.length} kali). gempor gue gila, coba gedein lagi menit atau jamnya.` });
                 }
             } else if (['gajadi', 'batal', 'cancel'].some(w => lowText.includes(w))) {
                 resetState(fromJid);
-                const reply = await generateCasualStateReply('oke sip, gue reset.', samples);
-                await sock.sendMessage(fromJid, { text: reply });
+                await sock.sendMessage(fromJid, { text: 'oke sip, gue reset.' });
             } else {
-                const reply = await generateCasualStateReply('coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit atau berapa jam?', samples);
-                await sock.sendMessage(fromJid, { text: reply });
+                await sock.sendMessage(fromJid, { text: 'coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit atau berapa jam?' });
             }
             return;
         }
@@ -686,8 +695,7 @@ async function startBot() {
                 
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
-                    const reply = await generateCasualStateReply(`ini yakin gue ngingetin ${calculated.length} kali? gempor gue gila bray, peladen bisa meledak. coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit?`, samples);
-                    await sock.sendMessage(fromJid, { text: reply });
+                    await sock.sendMessage(fromJid, { text: `ini yakin gue ngingetin ${calculated.length} kali? gempor gue gila bray, peladen bisa meledak. coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit?` });
                     return;
                 }
 
