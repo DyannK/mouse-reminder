@@ -1,4 +1,4 @@
-const { TelegramClient, Api } = require('telegram');
+const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
 const readline = require('readline');
@@ -39,7 +39,6 @@ async function initTelegramScraper(sock) {
         onError: (err) => console.error('Kendala otentikasi Telegram:', err.message),
     });
 
-    // Jika ini login pertama kali, simpan token string session agar tidak minta OTP lagi besok
     const currentSession = client.session.save();
     if (config.telegramSessionStr !== currentSession) {
         config.telegramSessionStr = currentSession;
@@ -49,43 +48,66 @@ async function initTelegramScraper(sock) {
 
     console.log('Modul pengerukan Telegram aktif dan berjalan di latar belakang.');
 
-    // Pasang pendengar kejadian untuk memantau pesan baru yang masuk
+    // Langkah 1: Pemanasan penyimpanan data lokal untuk memuat seluruh grup aktif di awal
+    try {
+        await client.getDialogs({});
+        console.log('Penyimpanan data lokal grup Telegram berhasil diperbarui.');
+    } catch (dialogErr) {
+        console.log('Pemuatan awal daftar obrolan dilewati, sistem akan mengandalkan deteksi dinamis.');
+    }
+
     client.addEventHandler(async (event) => {
         const message = event.message;
         if (!message || !message.message) return;
 
         try {
-            // Ambil informasi entitas asal pesan (bisa grup, channel, atau personal chat)
-            const chatEntity = await client.getEntity(message.peerId);
-            const chatTitle = chatEntity.title || '';
-            const chatIdStr = chatEntity.id ? chatEntity.id.toString() : '';
+            let chatTitle = 'Grup Telegram';
+            let chatIdStr = '';
+
+            // Langkah 2a: Proteksi pencarian identitas grup agar tidak memicu galat kritis
+            try {
+                const chatEntity = await client.getEntity(message.peerId);
+                chatTitle = chatEntity.title || 'Grup Telegram';
+                chatIdStr = chatEntity.id ? chatEntity.id.toString() : '';
+            } catch (chatErr) {
+                if (message.peerId && message.peerId.channelId) {
+                    chatIdStr = message.peerId.channelId.toString();
+                } else if (message.peerId && message.peerId.chatId) {
+                    chatIdStr = message.peerId.chatId.toString();
+                }
+                chatTitle = `Grup ID ${chatIdStr}`;
+            }
 
             const targets = config.telegramTargetGroups || [];
             
-            // COCOKKAN: Apakah asal grup sesuai dengan daftar target yang dipantau?
             const isMatched = targets.some(target => {
                 const cleanTarget = target.toString().trim().toLowerCase();
                 return chatTitle.toLowerCase() === cleanTarget || chatIdStr === cleanTarget || `-100${chatIdStr}` === cleanTarget;
             });
 
-            if (!isMatched) return; // Abaikan pesan dari grup lain
+            if (!isMatched) return;
 
-            // Ambil informasi pengirim pesan di dalam grup
             let senderName = 'Anggota Grup';
+
+            // Langkah 2b: Proteksi pencarian nama pengirim menggunakan blok pelindung mandiri
             if (message.fromId) {
-                const senderEntity = await client.getEntity(message.fromId);
-                senderName = senderEntity.firstName || senderEntity.username || 'Anggota Grup';
+                try {
+                    const senderEntity = await client.getEntity(message.fromId);
+                    senderName = senderEntity.firstName || senderEntity.username || 'Anggota Grup';
+                } catch (senderErr) {
+                    if (message.fromId.userId) {
+                        senderName = `Pengguna ID ${message.fromId.userId}`;
+                    }
+                }
             }
 
             const cleanText = message.message.trim();
             
-            // Format pesan ramah layar HP untuk diteruskan ke grup WhatsApp utama
             let whatsappPayload = `*[DITERUSKAN DARI TELEGRAM]*\n`;
             whatsappPayload += `Sumber: ${chatTitle}\n`;
             whatsappPayload += `Pengirim: ${senderName}\n\n`;
             whatsappPayload += cleanText;
 
-            // Kirim langsung hasil sadapan ke grup WhatsApp tujuan
             await sock.sendMessage(config.groupJid, { text: whatsappPayload });
             console.log(`[Telegram Scraper] Berhasil meneruskan pesan dari ${senderName} di grup ${chatTitle}`);
 
