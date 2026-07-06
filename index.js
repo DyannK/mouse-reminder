@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { loadConfig, saveConfig } = require('./configManager');
-const { handleCommand, resolveTargetsToJids, isAuthorized, handleListCommand } = require('./commandHandler');
+const { handleCommand, isAuthorized, handleListCommand } = require('./commandHandler');
 const { computeTriggerTimestamp, milestoneKey } = require('./deadlineParser');
 const { computeNextCronFire, formatCronKeTeks } = require('./timeParser');
 const { recordSample, buildStyleInstruction } = require('./styleProfiler');
@@ -309,7 +309,13 @@ async function checkDeadlines(sock) {
                     if (reminder.scope === 'group') await handleGroupTeamDistribution(sock, reminder, milestone, config);
                     if (milestone.isAuto && reminder.scope === 'group') await generateAndSendTeamReport(sock, reminder, config);
 
-                    const targetJids = resolveTargetsToJids(config, reminder.targets || ['group']);
+                    // LOGIKA BYPASS TARGET ROUTING HASIL AUDIT KELAS BERAT
+                    const targetJids = (reminder.targets || ['group']).map(t => {
+                        if (t === 'group') return config.groupJid;
+                        if (t === 'personal') return config.ownerJid;
+                        return t;
+                    }).filter(Boolean);
+
                     const targetTextMap = {};
                     const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
                     const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
@@ -357,7 +363,13 @@ function setupSchedules(sock) {
         if (reminder.type === 'deadline') return;
         const task = cron.schedule(reminder.cronPattern, () => {
             setTimeout(async () => {
-                const targetJids = resolveTargetsToJids(config, reminder.targets || ['group']);
+                // LOGIKA BYPASS TARGET ROUTING ALARM RECURRING
+                const targetJids = (reminder.targets || ['group']).map(t => {
+                    if (t === 'group') return config.groupJid;
+                    if (t === 'personal') return config.ownerJid;
+                    return t;
+                }).filter(Boolean);
+
                 const targetTextMap = {};
                 for (const jid of targetJids) {
                     targetTextMap[jid] = (await resolveTemplateForJid(reminder.message, reminder.manualFallback, jid, {}, reminder.formal)).text;
