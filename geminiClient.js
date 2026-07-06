@@ -1,22 +1,23 @@
 const { loadConfig } = require('./configManager');
 
-let currentKeyIndex = 0;
+let currentGeminiIndex = 0;
+let currentGroqIndex = 0;
 
 /**
- * Eksekusi panggilan API Gemini dengan sistem proteksi waktu tunggu dan rotasi kunci otomatis.
+ * Memanggil API Groq menggunakan fungsi fetch bawaan dengan standar OpenAI completions.
  */
-async function callGeminiWithRotation(prompt) {
-    const config = loadConfig();
-    const keys = config.geminiApiKeys || [];
-    
+async function callGroqFallback(prompt, config) {
+    const keys = config.groqApiKeys || [];
+    const model = config.groqModel || 'llama-3.3-70b-versatile';
+
     if (keys.length === 0) {
-        return { error: 'Kunci API Gemini belum diisi di berkas konfigurasi.' };
+        return { error: 'Kunci akses Groq kosong.' };
     }
 
     const maxAttempts = keys.length;
-    
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const activeIndex = (currentKeyIndex + attempt) % keys.length;
+        const activeIndex = (currentGroqIndex + attempt) % keys.length;
         const apiKey = keys[activeIndex];
 
         if (!apiKey || apiKey.includes('ISI_')) continue;
@@ -25,39 +26,97 @@ async function callGeminiWithRotation(prompt) {
         const timeoutId = setTimeout(() => controller.abort(), 7000);
 
         try {
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-                    signal: controller.signal
-                }
-            );
+            console.log(`[Hybrid System] Mengalihkan pencarian teks ke Groq (Indeks Kunci: ${activeIndex})...`);
+            
+            const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [{ role: 'user', content: prompt }]
+                }),
+                signal: controller.signal
+            });
 
             const data = await res.json();
-            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            const text = data?.choices?.[0]?.message?.content;
 
             if (text) {
-                currentKeyIndex = activeIndex; // Kunci sukses disimpan sebagai indeks utama
-                return { text: text.trim(), status: res.status };
+                currentGroqIndex = activeIndex;
+                return { text: text.trim(), provider: 'groq' };
             }
-            
-            console.error(`Kunci indeks ${activeIndex} gagal memberikan teks respons. Mencoba kunci cadangan berikutnya...`);
         } catch (err) {
-            console.error(`Kendala pada kunci indeks ${activeIndex} (${err.message}). Beralih ke kunci cadangan...`);
+            console.error(`[Groq Error] Kendala pada kunci Groq indeks ${activeIndex}: ${err.message}`);
         } finally {
             clearTimeout(timeoutId);
         }
     }
 
-    return { error: 'Seluruh kunci akses cadangan Gemini gagal merespons atau kehabisan kuota harian.' };
+    return { error: 'Seluruh jalur penyelamat kecerdasan buatan gagal merespons.' };
+}
+
+/**
+ * Fungsi utama dengan sistem rotasi kunci Gemini dan pengalihan otomatis ke Groq jika terjadi kendala.
+ */
+async function callAIWithHybridRotation(prompt) {
+    const config = loadConfig();
+    const geminiKeys = config.geminiApiKeys || [];
+    
+    // Tahap 1: Coba seluruh baris kunci akses Gemini terlebih dahulu
+    if (geminiKeys.length > 0) {
+        const maxGeminiAttempts = geminiKeys.length;
+
+        for (let attempt = 0; attempt < maxGeminiAttempts; attempt++) {
+            const activeIndex = (currentGeminiIndex + attempt) % geminiKeys.length;
+            const apiKey = geminiKeys[activeIndex];
+
+            if (!apiKey || apiKey.includes('ISI_')) continue;
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+            try {
+                const res = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+                        signal: controller.signal
+                    }
+                );
+
+                const data = await res.json();
+                const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (text) {
+                    currentGeminiIndex = activeIndex;
+                    return { text: text.trim(), provider: 'gemini' };
+                }
+            } catch (err) {
+                console.error(`[Gemini Error] Kendala pada kunci Gemini indeks ${activeIndex}: ${err.message}`);
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+    }
+
+    // Tahap 2: Jika Gemini habis atau bermasalah, langsung lempar ke Groq
+    const groqResult = await callGroqFallback(prompt, config);
+    if (groqResult.text) {
+        return { text: groqResult.text, provider: 'groq' };
+    }
+
+    return { error: groqResult.error };
 }
 
 function buildGayaInstruction(formal) {
     return formal
-        ? 'Gaya bahasa formal/baku: pakai kapitalisasi standar di awal kalimat, tata bahasa yang benar, sopan.'
-        : 'Gaya bahasa santai kayak chat sehari-hari: awal kalimat BOLEH huruf kecil (jangan maksa kapital kayak surat resmi), boleh singkatan wajar.';
+        ? 'Gaya bahasa formal atau baku: pakai kapitalisasi standar di awal kalimat, tata bahasa yang benar, sopan.'
+        : 'Gaya bahasa santai seperti obrolan chat sehari-hari: awal kalimat boleh menggunakan huruf kecil, boleh singkatan wajar, tapi hindari kesan kaku.';
 }
 
 async function generateAIText(tema, context = {}, styleInstruction = null, manualFallback = null, formal = false) {
@@ -65,44 +124,43 @@ async function generateAIText(tema, context = {}, styleInstruction = null, manua
     
     let prompt = `Tulis 1 kalimat pengingat singkat dalam Bahasa Indonesia dengan tema: "${tema}".`;
     if (context.isNow) {
-        prompt += ` PENTING: ini dikirim TEPAT PAS waktunya sekarang (eksekusi), BUKAN pengingat menjelang — jadi framing-nya "sekarang saatnya", bukan "akan datang" atau "menuju".`;
+        prompt += ` PENTING: ini dikirim tepat pada waktunya sekarang, bukan pengingat menjelang — jadi bingkai kalimatnya adalah "sekarang saatnya", bukan "akan datang" atau "menuju".`;
     } else if (context.sisa) {
         prompt += ` Info waktu: ${context.sisa}.`;
     }
-    if (context.judul) prompt += ` Judul acara/tugas: "${context.judul}".`;
+    if (context.judul) prompt += ` Judul acara atau tugas: "${context.judul}".`;
     prompt += ` ${buildGayaInstruction(formal)}`;
     if (styleInstruction) prompt += ` ${styleInstruction}`;
-    prompt += ` Maksimal 2 kalimat, boleh pakai emoji secukupnya. Jangan pakai tanda kutip di jawaban.`;
+    prompt += ` Maksimal 2 kalimat, boleh pakai emoji secukupnya. Jangan sertakan tanda kutip atau backtick pada hasil jawaban jawaban.`;
 
-    const result = await callGeminiWithRotation(prompt);
+    const result = await callAIWithHybridRotation(prompt);
     if (result.text) return { text: result.text, usedFallback: false };
     
     return { text: fallbackText, usedFallback: true };
 }
 
 async function generateTagReply(triggerText, styleInstruction = null) {
-    let prompt = `Kamu adalah asisten reminder di grup WhatsApp. Ada yang nge-tag/mention kamu dengan pesan: "${triggerText}". Balas singkat (maks 2 kalimat), santai, dan nyambung sama konteks pesannya. Boleh emoji secukupnya. Jangan pakai tanda kutip di jawaban.`;
+    let prompt = `Kamu adalah asisten pengingat di grup WhatsApp. Ada yang memanggil kamu melalui tag dengan pesan: "${triggerText}". Balas singkat maksimal 2 kalimat, santai, dan nyambung dengan konteks pembicaraannya. Boleh gunakan emoji yang umum. Jangan sertakan tanda kutip pada jawaban.`;
     if (styleInstruction) prompt += ` ${styleInstruction}`;
 
-    const result = await callGeminiWithRotation(prompt);
+    const result = await callAIWithHybridRotation(prompt);
     return result.text || null;
 }
 
-/**
- * Pembedah kalimat kasual untuk mendeteksi apakah pengguna ingin membuat jadwal produktif atau sekadar mengobrol.
- */
 async function parseIntentFromText(triggerText) {
-    const prompt = `Analisis kalimat dari pengguna berikut untuk menentukan apakah mereka berniat membuat pengingat/jadwal/tenggat waktu baru atau tidak.\n\nKalimat: "${triggerText}"\n\nKembalikan jawaban dalam bentuk JSON mentah utuh TANPA menggunakan format markdown block. Struktur JSON harus memiliki kolom: \n- isReminder (boolean)\n- type ("recurring" atau "deadline" atau null)\n- judul (string atau null)\n- waktu (string format DD-MM-YYYY HH:MM atau HH:MM saja atau null)\n- milestones (string atau null, misal "1hari,2jam")\n- isGroupTask (boolean, true jika ada kata "kita", "kelompok", "tim")\n- replyPasif (string, jika isReminder false, isi dengan kalimat balasan santai untuk menanggapi obrolan mereka).`;
+    const prompt = `Analisis kalimat pengguna berikut untuk mendeteksi apakah mereka bermaksud membuat pengingat atau jadwal baru.\n\nKalimat: "${triggerText}"\n\nKembalikan jawaban eksklusif berupa JSON mentah utuh tanpa menggunakan format markdown block. Struktur objek JSON wajib memiliki properti berikut:\n- isReminder (boolean)\n- type ("recurring" atau "deadline" atau null)\n- judul (string atau null)\n- waktu (string format HH:MM atau DD-MM-YYYY HH:MM atau null)\n- milestones (string atau null, contoh: "1hari,2jam")\n- isGroupTask (boolean, true jika ada kata kita atau kelompok atau tim)\n- replyPasif (string, jika isReminder false, isi dengan kalimat balasan santai dan adaptif untuk menanggapi obrolan mereka).`;
     
-    const result = await callGeminiWithRotation(prompt);
-    if (!result.text) return { isReminder: false, replyPasif: 'Akses kecerdasan buatan sedang sibuk, coba lagi nanti ya.' };
+    const result = await callAIWithHybridRotation(prompt);
+    if (!result.text) {
+        return { isReminder: false, replyPasif: 'Jalur pemrosesan kecerdasan buatan sedang penuh, coba sesaat lagi ya.' };
+    }
 
     try {
         const cleanJson = result.text.replace(/```json|```/g, '').trim();
         return JSON.parse(cleanJson);
     } catch (err) {
-        console.error('Gagal membedah format JSON intent:', result.text);
-        return { isReminder: false, replyPasif: 'Akses pemrosesan pesan mengalami kendala format.' };
+        console.error('Gagal mengurai JSON intent:', result.text);
+        return { isReminder: false, replyPasif: 'Gagal memproses format teks perintah.' };
     }
 }
 
