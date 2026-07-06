@@ -76,4 +76,43 @@ function formatCronKeTeks(cronPattern) {
     return `${jamStr} (${hariStr})`;
 }
 
-module.exports = { parseWaktuKeCron, formatCronKeTeks };
+/**
+ * Hitung timestamp (ms) kapan sebuah cron pattern (format: "menit jam * * dow") berikutnya
+ * akan terpicu, dihitung dari sekarang. Scan maju sampai 8 hari ke depan.
+ * Dipakai buat fitur pre-generate teks AI (biar ada buffer waktu sebelum jadwal beneran).
+ */
+function computeNextCronFire(cronPattern, fromMs = Date.now()) {
+    const [minuteStr, hourStr, , , dow] = cronPattern.split(' ');
+    const minute = parseInt(minuteStr, 10);
+    const hour = parseInt(hourStr, 10);
+
+    let allowedDows;
+    if (dow === '*') {
+        allowedDows = [0, 1, 2, 3, 4, 5, 6];
+    } else if (dow === '1-5') {
+        allowedDows = [1, 2, 3, 4, 5];
+    } else if (dow === '6,0' || dow === '0,6') {
+        allowedDows = [6, 0];
+    } else {
+        allowedDows = dow.split(',').map(d => parseInt(d, 10));
+    }
+
+    // geser "sekarang" ke representasi WIB (sbg UTC semu) biar gampang ambil Y/M/D/dow-nya
+    const nowLocal = new Date(fromMs + 7 * 3600 * 1000);
+
+    for (let dayOffset = 0; dayOffset <= 8; dayOffset++) {
+        const Y = nowLocal.getUTCFullYear();
+        const M = nowLocal.getUTCMonth();
+        const D = nowLocal.getUTCDate() + dayOffset;
+
+        const candidateLocal = new Date(Date.UTC(Y, M, D, hour, minute, 0));
+        const candidateDow = candidateLocal.getUTCDay();
+        if (!allowedDows.includes(candidateDow)) continue;
+
+        const candidateTimestamp = Date.UTC(Y, M, D, hour - 7, minute, 0); // balikin ke UTC asli
+        if (candidateTimestamp > fromMs) return candidateTimestamp;
+    }
+    return null; // gak ketemu dalam 8 hari (harusnya gak pernah kejadian)
+}
+
+module.exports = { parseWaktuKeCron, formatCronKeTeks, computeNextCronFire };

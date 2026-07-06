@@ -8,6 +8,7 @@ function loadConfig() {
     if (!raw.contacts) raw.contacts = [];
     if (!raw.reminders) raw.reminders = [];
     if (!raw.geminiApiKey) raw.geminiApiKey = '';
+    if (!raw.styleProfiles) raw.styleProfiles = {};
     return raw;
 }
 
