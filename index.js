@@ -14,7 +14,7 @@ const { recordSample, buildStyleInstruction } = require('./styleProfiler');
 const { initTelegramScraper } = require('./telegramScraper');
 
 const { logGroupMessage, getGroupLogs } = require('./chatLogger');
-const { parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
+const { generateAIText, parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
 
 const userStates = {};
 
@@ -25,7 +25,8 @@ let scheduledTasks = [];
 let botJidNumber = null;
 let isCheckingDeadlines = false;
 
-const CANCEL_WORDS = ['gajadi', 'batal', 'ntar aja', 'udahan', 'cancel', 'sip', 'oke', 'ok', 'thanks', 'makasih', 'yaudah'];
+// Perluasan detektor kata penutup agar lebih peka terhadap bahasa kasual
+const CANCEL_WORDS = ['gajadi', 'batal', 'ntar aja', 'udahan', 'cancel', 'sip', 'oke', 'ok', 'thanks', 'makasih', 'yaudah', 'oke dah', 'oke deh', 'bray'];
 
 function resetState(jid) {
     if (userStates[jid]?.timer) clearTimeout(userStates[jid].timer);
@@ -44,12 +45,26 @@ function setState(jid, mode, data = {}) {
     };
 }
 
+// MESIN PENERJEMAH TEMPLATE MANUAL & GENERATOR AI DIKEMBALIKAN UTUH
+async function resolveTemplateForJid(messageTemplate, manualFallback, jid, context = {}, formal = false) {
+    if ((messageTemplate || '').startsWith('AI:')) {
+        const tema = messageTemplate.replace('AI:', '').trim();
+        const styleInstruction = buildStyleInstruction(jid);
+        return await generateAIText(tema, context, styleInstruction, manualFallback, formal);
+    }
+    let text = messageTemplate || '';
+    if (context.sisa) text = text.replace(/{sisa}/g, context.sisa);
+    if (context.judul) text = text.replace(/{judul}/g, context.judul);
+    return { text, usedFallback: false };
+}
+
 async function deliverToJids(sock, reminder, targetTextMap) {
     for (const [jid, text] of Object.entries(targetTextMap)) {
         try {
             await sock.sendPresenceUpdate('composing', jid);
             await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
             await sock.sendMessage(jid, { text });
+            console.log(`[${reminder.id}] terkirim ke ${jid}`);
         } catch (err) {
             console.error(`gagal kirim ke ${jid}:`, err);
         }
@@ -76,9 +91,13 @@ async function checkDeadlines(sock) {
                     const targetJids = resolveTargetsToJids(config, reminder.targets || ['group']);
                     const targetTextMap = {};
                     const textPesan = milestone.isAuto ? reminder.nowMessage : reminder.message;
+                    const fallbackPesan = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
+                    const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
                     
+                    // Penyaringan template diaktifkan kembali untuk memproses {judul} dan {sisa}
                     for (const jid of targetJids) {
-                        targetTextMap[jid] = textPesan;
+                        const resolved = await resolveTemplateForJid(textPesan, fallbackPesan, jid, context, reminder.formal);
+                        targetTextMap[jid] = resolved.text;
                     }
 
                     await deliverToJids(sock, reminder, targetTextMap);
@@ -119,7 +138,10 @@ function setupSchedules(sock) {
             setTimeout(async () => {
                 const targetJids = resolveTargetsToJids(config, reminder.targets || ['group']);
                 const targetTextMap = {};
-                for (const jid of targetJids) targetTextMap[jid] = reminder.message;
+                for (const jid of targetJids) {
+                    const resolved = await resolveTemplateForJid(reminder.message, reminder.manualFallback, jid, {}, reminder.formal);
+                    targetTextMap[jid] = resolved.text;
+                }
                 await deliverToJids(sock, reminder, targetTextMap);
             }, Math.random() * 15 * 1000);
         }, { timezone: 'Asia/Jakarta' });
@@ -171,10 +193,11 @@ async function startBot() {
             return;
         }
 
+        // PENCEGAT MUTLAK KALIMAT PENUTUP KASUAL
         const isCancel = CANCEL_WORDS.some(w => text.toLowerCase().includes(w) || text.toLowerCase() === w);
-        if (isCancel && userStates[fromJid]) {
+        if (isCancel) {
             resetState(fromJid);
-            await sock.sendMessage(fromJid, { text: 'oke sip, gue reset ya.' }, { quoted: msg });
+            await sock.sendMessage(fromJid, { text: 'oke siap, obrolan gue tutup ya bray.' }, { quoted: msg });
             return;
         }
 
@@ -197,15 +220,16 @@ async function startBot() {
                         targetTimestamp = targetDate.getTime();
                     }
 
+                    // Penambahan format baku perbaikan untuk penanganan {judul}
                     config.reminders.push({
                         id: `ai_${Date.now().toString().slice(-4)}`,
                         type: 'deadline',
                         scope: isGroup ? 'group' : 'personal',
                         targetTimestamp: targetTimestamp,
                         judul: data.judul,
-                        message: `waktunya ${data.judul} bentar lagi nih!`,
+                        message: `waktunya {judul} bentar lagi nih!`,
                         manualFallback: data.judul,
-                        nowMessage: `sekarang waktunya ${data.judul} coy!`,
+                        nowMessage: `sekarang waktunya {judul} coy!`,
                         nowManualFallback: data.judul,
                         milestones: [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }],
                         firedMilestones: [],
