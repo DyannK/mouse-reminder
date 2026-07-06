@@ -49,6 +49,7 @@ function setState(jid, mode, data = {}) {
     };
 }
 
+// LOGIKA BARU: MESIN PEMOTONG SUKU KATA OTOMATIS (NON-KAKU FALLBACK)
 function getNick(jid, pushName, config) {
     const nameMap = {
         'dyan': 'yan',
@@ -56,17 +57,40 @@ function getNick(jid, pushName, config) {
         'fizar': 'zar',
         'prayoga': 'yog',
         'helmi': 'hel',
-        'azanta': 'zan'
+        'azanta': 'zan',
+        'nadirah': 'nad',
+        'samuel': 'sam'
     };
+    
     let mappedName = config.accountMapping[jid];
     if (!mappedName && jid === config.ownerJid) mappedName = 'dyan';
     if (!mappedName) mappedName = pushName || 'coy';
     
-    const lowName = mappedName.toLowerCase();
+    // Isolasi kata pertama dan paksa huruf kecil semua
+    let firstName = mappedName.trim().split(/\s+/)[0].toLowerCase();
+    
+    // Cek kecocokan kamus inti
+    if (nameMap[firstName]) return nameMap[firstName];
     for (const [key, val] of Object.entries(nameMap)) {
-        if (lowName.includes(key)) return val;
+        if (firstName.includes(key)) return val;
     }
-    return lowName.slice(0, 3);
+    
+    // EVALUATOR KASUAL SUKU KATA (LINGUISTIC FALLBACK ENGINE)
+    if (firstName.length <= 4) return firstName;
+    
+    const isVowel = (ch) => ['a','e','i','o','u'].includes(ch);
+    
+    // Deteksi pola double konsonan di tengah (contoh: helmi -> l & m mati)
+    if (!isVowel(firstName[2]) && !isVowel(firstName[3])) {
+        return firstName.slice(0, 3);
+    }
+    
+    // Deteksi pola vokal suku kata terbuka/tertutup (contoh: nadirah -> nad)
+    if (!isVowel(firstName[2])) {
+        return firstName.slice(0, 3);
+    }
+    
+    return firstName.slice(0, 2);
 }
 
 function getJakartaDateComponents(baseDate = new Date()) {
@@ -162,7 +186,7 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
         `- _"ganti interval jadi 5 menit"_\n\n` +
         `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
 
-    await sock.sendMessage(fromJid, { text: confirmationText.toLowerCase() }, { quoted: msg });
+    await sock.sendMessage(fromJid, { text: confirmationText.toLowerCase() }, { quoted: quotedMsg });
 }
 
 function translateCronToHuman(cronPattern) {
@@ -574,8 +598,6 @@ async function startBot() {
                 return;
             }
         }
-
-        const lowText = text.trim().toLowerCase();
 
         // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
