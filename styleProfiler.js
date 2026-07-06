@@ -5,17 +5,16 @@ const EMOJI_REGEX = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
 
 /** Simpan 1 sample pesan dari seseorang (dipanggil pasif tiap ada pesan teks biasa masuk). */
 function recordSample(jid, text) {
-    if (!text || text.trim().length < 3) return; // skip pesan kependekan, gak representatif
-    const config = loadConfig();
+    let config = loadConfig();
     if (!config.styleProfiles) config.styleProfiles = {};
     if (!config.styleProfiles[jid]) config.styleProfiles[jid] = { samples: [], manualDescription: '' };
 
-    config.styleProfiles[jid].samples.push(text);
-    if (config.styleProfiles[jid].samples.length > MAX_SAMPLES) {
-        config.styleProfiles[jid].samples.shift(); // buang yang paling lama, biar tetap "gaya terkini"
+    const profile = config.styleProfiles[jid];
+    if (!profile.samples.includes(text)) {
+        profile.samples.push(text);
+        if (profile.samples.length > 100) profile.samples.shift(); // Naikin batas ke 100
+        saveConfig(config);
     }
-    // Menggunakan penyimpanan berkala agar tidak membebani performa prosesor saat grup ramai
-    saveConfigDebounced(config);
 }
 
 /** Set deskripsi gaya manual (seed awal), lewat command /gayaketik. */

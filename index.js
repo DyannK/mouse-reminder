@@ -14,6 +14,11 @@ const { computeNextCronFire, formatCronKeTeks } = require('./timeParser');
 const { recordSample, buildStyleInstruction } = require('./styleProfiler');
 const { initTelegramScraper } = require('./telegramScraper');
 
+const { logGroupMessage, getGroupLogs } = require('./chatLogger');
+const { parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
+
+const userStates = {};
+
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
@@ -22,6 +27,26 @@ const pendingConfirmations = {};
 let botJidNumber = null;
 
 let isCheckingDeadlines = false;
+
+const CANCEL_WORDS = ['gajadi', 'batal', 'ntar aja', 'udahan', 'cancel'];
+
+function resetState(jid) {
+    if (userStates[jid]?.timer) clearTimeout(userStates[jid].timer);
+    delete userStates[jid];
+}
+
+function setState(jid, mode, data = {}) {
+    if (userStates[jid]?.timer) clearTimeout(userStates[jid].timer);
+    userStates[jid] = {
+        mode,
+        data,
+        timer: setTimeout(() => {
+            resetState(jid);
+            console.log(`state ${jid} kereset otomatis karena 10 menit ga ada respon.`);
+        }, 10 * 60 * 1000) // 10 menit auto reset
+    };
+}
+
 
 async function resolveTemplateForJid(messageTemplate, manualFallback, jid, context = {}, formal = false) {
     if ((messageTemplate || '').startsWith('AI:')) {
@@ -294,103 +319,98 @@ async function startBot() {
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+    const msg = m.messages[0];
+    if (!msg.message || msg.key.fromMe) return;
 
-        const fromJid = msg.key.remoteJid;
-        const isGroup = fromJid.endsWith('@g.us');
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
-        let config = loadConfig();
+    const fromJid = msg.key.remoteJid;
+    const isGroup = fromJid.endsWith('@g.us');
+    const senderName = msg.pushName || 'Orang';
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+    
+    let config = loadConfig();
 
-        // GERBANG MUTLAK 1: PERINTAH MANUAL
-        if (text.startsWith('/')) {
-            await handleCommand(sock, text, fromJid, () => setupSchedules(sock));
-            return;
-        }
+    // PENYADAP PASIF GRUP (Merekam di background terus-terusan)
+    if (isGroup && text) {
+        logGroupMessage(senderName, text);
+    }
 
-        // GERBANG MUTLAK 2: MEDIA MILIK PEMILIK
-        if (!isGroup && fromJid === config.ownerJid && (msg.message.imageMessage || msg.message.videoMessage)) {
-            await processMediaReminderDownload(sock, msg, fromJid, text, config);
-            return;
-        }
+    // GERBANG MUTLAK SLASH COMMAND
+    if (text.startsWith('/')) {
+        resetState(fromJid); // reset state kalau dia mendadak pakai slash
+        await handleCommand(sock, text, fromJid, () => setupSchedules(sock));
+        return;
+    }
 
-        // PELACAKAN AKTIVITAS TIM
-        if (!isGroup) {
-            let tracked = false;
-            config.reminders.forEach(r => {
-                if (r.teamTracking && r.teamTracking[fromJid] && r.teamTracking[fromJid].status !== 'Aktif') {
-                    r.teamTracking[fromJid] = { status: 'Aktif', message: text };
-                    tracked = true;
-                }
-            });
-            if (tracked) {
-                saveConfig(config);
-                await sock.sendMessage(fromJid, { text: 'siap' });
-                return;
-            }
-        }
+    // DETEKSI KATA BATAL
+    const isCancel = CANCEL_WORDS.some(w => text.toLowerCase().includes(w));
+    if (isCancel && userStates[fromJid]) {
+        resetState(fromJid);
+        await sock.sendMessage(fromJid, { text: 'oke, gajadi ya. gue reset nih.' }, { quoted: msg });
+        return;
+    }
 
-        // KONFIRMASI JADWAL CERDAS
-        if (pendingConfirmations[fromJid] && text.trim().toLowerCase() === 'iya') {
-            const data = pendingConfirmations[fromJid];
-            let targetTimestamp = Date.now();
-            
-            if (data.waktuRaw && data.waktuRaw.includes(':')) {
-                const [hour, minute] = data.waktuRaw.split(':').map(Number);
-                const hariIni = new Date();
-                const targetDate = new Date(hariIni.getFullYear(), hariIni.getMonth(), hariIni.getDate(), hour, minute, 0);
-                
-                if (targetDate.getTime() <= Date.now()) {
-                    targetDate.setDate(targetDate.getDate() + 1);
-                }
-                targetTimestamp = targetDate.getTime();
-            }
-
-            if (data.type === 'deadline') {
-                config.reminders.push({
-                    id: data.id,
-                    type: 'deadline',
-                    scope: data.scope,
-                    targetTimestamp: targetTimestamp,
-                    judul: data.judul,
-                    message: `⏰ {sisa} menuju {judul}!`,
-                    manualFallback: data.judul,
-                    nowMessage: `🔔 waktunya {judul}!`,
-                    nowManualFallback: data.judul,
-                    milestones: [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }],
-                    firedMilestones: [],
-                    pendingAITexts: {},
-                    targets: [isGroup ? 'group' : fromJid],
-                    mediaPath: null,
-                    mediaType: null,
-                    teamTracking: {}
-                });
-            }
-            saveConfig(config);
-            delete pendingConfirmations[fromJid];
-            setupSchedules(sock);
-            await sock.sendMessage(fromJid, { text: 'jadwal udah gue simpen secara permanen ya.' });
-            return;
-        }
-
-        // PEMROSESAN CHAT AI KASUAL
-        if (isGroup) {
-            const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            if (mentionedJids.some(j => j.split(':')[0] === botJidNumber)) {
-                await handleCasualAIRequest(sock, msg, fromJid, text, config);
-            }
-        } else {
-            if (isAuthorized(config, fromJid)) {
-                await handleCasualAIRequest(sock, msg, fromJid, text, config);
+    // HANDLE STATE YANG LAGI JALAN (Obrolan ngunci di sini)
+    if (userStates[fromJid]) {
+        const state = userStates[fromJid];
+        
+        if (state.mode === 'confirm_schedule') {
+            if (text.toLowerCase() === 'iya') {
+                // ... (Eksekusi simpan jadwal pakai logika yang lama, lalu reset state)
+                resetState(fromJid);
+                await sock.sendMessage(fromJid, { text: 'jadwal udah gue simpen secara permanen ya.' });
+            } else if (text.toLowerCase() === 'chatan') {
+                setState(fromJid, 'chat');
+                await sock.sendMessage(fromJid, { text: 'oke gas, mau ngobrolin apaan nih?' });
             } else {
-                await sock.sendMessage(fromJid, { text: 'akses terbatas. daftar pake /daftar dulu cuy.' });
+                await sock.sendMessage(fromJid, { text: 'mau lanjut chatan ajaa, atau fix buat agenda nih? balas "iya" atau "chatan"' });
             }
+            return;
         }
 
-        if (text && (isGroup || isAuthorized(config, fromJid))) {
-            recordSample(isGroup ? (msg.key.participant || fromJid) : fromJid, text);
+        if (state.mode === 'chat') {
+            const samples = config.styleProfiles[fromJid]?.samples || [];
+            const reply = await generateMimicReply(text, samples);
+            await sock.sendMessage(fromJid, { text: reply });
+            // Perbarui timer karena dia masih asik ngobrol
+            setState(fromJid, 'chat'); 
+            return;
         }
-    });
+    }
+
+    // PEMROSESAN AWAL KASUAL (Kalau belum ada state)
+    const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    const isBotMentioned = mentionedJids.some(j => j.split(':')[0] === botJidNumber);
+
+    if (!isGroup || isBotMentioned) {
+        const intentData = await parseIntentFromText(text);
+
+        if (intentData.intent === 'create_schedule') {
+            setState(fromJid, 'confirm_schedule', intentData);
+            await sock.sendMessage(fromJid, { text: `gue nangkep lu mau bikin jadwal "${intentData.judul}" jam ${intentData.waktu}. mau lanjut chatan aja, atau fix buat agenda nih? bales "iya" kalau fix.` });
+        
+        } else if (intentData.intent === 'summarize') {
+            const logs = getGroupLogs(intentData.jumlahChat || 200);
+            if (logs.length === 0) {
+                await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam nih coy.' });
+            } else {
+                await sock.sendMessage(fromJid, { text: 'bentar, gue baca-baca dulu ya...' });
+                const summary = await summarizeChatLog(logs);
+                await sock.sendMessage(fromJid, { text: summary });
+            }
+            
+        } else if (intentData.intent === 'read_schedule') {
+            // Biar gampang, kita paksa aja masuk ke perintah manual /list di background
+            await handleCommand(sock, '/list', fromJid, () => setupSchedules(sock));
+            
+        } else {
+            // Intent chat biasa, langsung masuk mode obrolan panjang
+            setState(fromJid, 'chat');
+            const samples = config.styleProfiles[fromJid]?.samples || [];
+            const reply = await generateMimicReply(text, samples);
+            await sock.sendMessage(fromJid, { text: reply }, { quoted: msg });
+        }
+    }
+});
 
     sock.ev.on('creds.update', saveCreds);
 }

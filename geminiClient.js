@@ -3,47 +3,28 @@ const { loadConfig } = require('./configManager');
 let currentGeminiIndex = 0;
 let currentGroqIndex = 0;
 
-async function callGroqFallback(prompt, config) {
+async function callGroq(prompt, config, systemInstruction) {
     const keys = config.groqApiKeys || [];
     const model = 'llama-3.3-70b-versatile';
 
-    if (keys.length === 0) return { error: 'kunci akses groq kosong.' };
+    if (keys.length === 0) return { error: 'kunci groq kosong' };
 
-    const maxAttempts = keys.length;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    for (let attempt = 0; attempt < keys.length; attempt++) {
         const activeIndex = (currentGroqIndex + attempt) % keys.length;
         const apiKey = keys[activeIndex];
 
         if (!apiKey || apiKey.includes('ISI_')) continue;
-
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 7000);
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
 
         try {
             const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     model: model,
                     messages: [
-                        { 
-                            role: 'system', 
-                            content: `lu adalah temen tongkrongan di grup whatsapp. 
-aturan wajib mutlak:
-1. gunakan bahasa indonesia kasual tongkrongan, pakai kata gue dan lu.
-2. wajib gunakan huruf kecil di awal kalimat dan di mana pun, jangan pakai huruf kapital sama sekali biar keliatan kayak ngetik santai.
-3. dilarang keras membalas seperti robot, asisten, atau admin olshop.
-4. kalau nolak atau ga ngerti, jawab santai aja.
-
-contoh balasan yang bener:
-- oi coy, jadwal lu udah gue amanin nih.
-- buset, jamnya ga jelas nih, perjelas lagi dong.
-- siap, nanti gue ingetin.` 
-                        },
+                        { role: 'system', content: systemInstruction },
                         { role: 'user', content: prompt }
                     ],
                     temperature: 0.8
@@ -52,140 +33,66 @@ contoh balasan yang bener:
             });
 
             const data = await res.json();
-
-            if (!res.ok) {
-                console.error(`[log eror groq] indeks ${activeIndex} | status: ${res.status}`);
-                continue;
-            }
+            if (!res.ok) continue;
 
             const text = data?.choices?.[0]?.message?.content;
             if (text) {
                 currentGroqIndex = activeIndex;
-                return { text: text.trim().toLowerCase(), provider: 'groq' };
+                return { text: text.trim() };
             }
         } catch (err) {
-            console.error(`[kendala jaringan groq] indeks ${activeIndex}: ${err.message}`);
+            console.error(err.message);
         } finally {
             clearTimeout(timeoutId);
         }
     }
-
-    return { error: 'seluruh jalur groq gagal merespons.' };
+    return { text: null };
 }
 
-async function callAIWithHybridRotation(prompt) {
-    const config = loadConfig();
-    const geminiKeys = config.geminiApiKeys || [];
-    
-    if (geminiKeys.length > 0) {
-        const maxGeminiAttempts = geminiKeys.length;
-
-        for (let attempt = 0; attempt < maxGeminiAttempts; attempt++) {
-            const activeIndex = (currentGeminiIndex + attempt) % geminiKeys.length;
-            const apiKey = geminiKeys[activeIndex];
-
-            if (!apiKey || apiKey.includes('ISI_')) continue;
-
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 7000);
-
-            try {
-                const res = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-                    {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-                        signal: controller.signal
-                    }
-                );
-
-                const data = await res.json();
-
-                if (!res.ok) {
-                    console.error(`[log eror gemini] indeks ${activeIndex} | status: ${res.status}`);
-                    continue;
-                }
-
-                const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (text) {
-                    currentGeminiIndex = activeIndex;
-                    return { text: text.trim().toLowerCase(), provider: 'gemini' };
-                }
-            } catch (err) {
-                console.error(`[kendala jaringan gemini] indeks ${activeIndex}: ${err.message}`);
-            } finally {
-                clearTimeout(timeoutId);
-            }
-        }
-    }
-
-    const groqResult = await callGroqFallback(prompt, config);
-    if (groqResult.text) return { text: groqResult.text, provider: 'groq' };
-
-    return { error: groqResult.error };
-}
-
-function buildGayaInstruction() {
-    return 'gaya bahasa wajib sangat santai, natural, mengalir seperti chat sehari-hari. gunakan huruf kecil di awal kalimat agar terasa manusiawi, boleh pakai singkatan wajar, gunakan panggilan yang akrab, buang total struktur kaku.';
-}
-
-async function generateAIText(tema, context = {}, styleInstruction = null, manualFallback = null, formal = false) {
-    const fallbackText = manualFallback || `📌 ${tema}`;
-    if (formal) return { text: fallbackText, usedFallback: true };
-    
-    let prompt = `tulis 1 kalimat pengingat pendek bertema: ${tema}.`;
-    if (context.isNow) prompt += ` sekarang adalah waktu eksekusi acaranya.`;
-    else if (context.sisa) prompt += ` sisa waktu: ${context.sisa}.`;
-    if (context.judul) prompt += ` judul agenda: ${context.judul}.`;
-    prompt += ` ${buildGayaInstruction()}`;
-    if (styleInstruction) prompt += ` ${styleInstruction}`;
-    prompt += ` maksimal 2 kalimat pendek.`;
-
-    const result = await callAIWithHybridRotation(prompt);
-    if (result.text) return { text: result.text, usedFallback: false };
-    
-    return { text: fallbackText, usedFallback: true };
-}
-
-async function generateTagReply(triggerText, styleInstruction = null) {
-    let prompt = `lu adalah teman yang asik di grup whatsapp. seseorang memanggil lu dengan pesan: ${triggerText}. balas pendek maksimal 2 kalimat, santai, nyambung, dan gunakan gaya chat tongkrongan. ${buildGayaInstruction()}`;
-    if (styleInstruction) prompt += ` ${styleInstruction}`;
-
-    const result = await callAIWithHybridRotation(prompt);
-    return result.text || 'oi, ada apa coy?';
-}
-
+// MESIN EKSTRAKSI LOGIKA (Buta Emosi)
 async function parseIntentFromText(triggerText) {
-    const prompt = `analisis kalimat dari pengguna ini untuk mendeteksi pembuatan jadwal.
-kalimat: ${triggerText}
+    const system = `analisis kalimat untuk klasifikasi intent. keluarkan format JSON mentah tanpa markdown.
+intent bisa berupa: "create_schedule", "read_schedule", "summarize", "chat".
+aturan:
+1. jika jam/judul tidak ada, fallback ke intent "chat".
+2. perintah hapus/edit tidak diizinkan di sini, jatuhkan ke "chat".
 
-kembalikan jawaban dalam bentuk json mentah.
-aturan validasi:
-1. jika jam tidak ada atau tidak jelas, isReminder wajib false.
-2. jika judul acara tidak jelas, isReminder wajib false.
-
-struktur json:
+format json:
 {
-  "isReminder": boolean,
-  "type": "deadline",
+  "intent": string,
   "judul": string atau null,
-  "waktu": string format "HH:MM" atau null,
-  "milestones": "1hari,2jam",
-  "isGroupTask": boolean,
-  "replyPasif": string
+  "waktu": string "HH:MM" atau null,
+  "jumlahChat": number (jika intent summarize, tangkap angkanya, default 200)
 }`;
-    
-    const result = await callAIWithHybridRotation(prompt);
-    if (!result.text) return { isReminder: false, replyPasif: 'jalur ai lagi padat nih coy, coba bentar lagi ya.' };
-
+    const result = await callGroq(triggerText, loadConfig(), system);
     try {
-        const cleanJson = result.text.replace(/```json|```/gi, '').trim();
-        return JSON.parse(cleanJson);
-    } catch (err) {
-        console.error('gagal mengurai json intent:', result.text);
-        return { isReminder: false, replyPasif: 'kalimat lu agak belibet nih, mending pake perintah manual aja coy.' };
+        return JSON.parse(result.text.replace(/```json|```/gi, '').trim());
+    } catch {
+        return { intent: 'chat' };
     }
 }
 
-module.exports = { generateAIText, generateTagReply, parseIntentFromText };
+// MESIN PENIRU EMOSI (Mimicking)
+async function generateMimicReply(triggerText, recentSamples) {
+    const system = `lu adalah temen nongkrong di WA.
+aturan mutlak:
+1. pakai gaya bahasa indonesia kasual banget, pakai gue/lu.
+2. PERHATIKAN EMOSI PENGGUNA: kalau dia pakai huruf berulang ("guyyyss", "apaaaa"), huruf kapital untuk ngegas, atau singkatan alay, LU WAJIB NIRU vibe dan energinya persis kayak gitu.
+3. pelajari gaya ketikannya dari histori ini: ${recentSamples.join(' | ')}
+4. jangan pernah kayak robot, jawab sesingkat dan seasik mungkin.`;
+    
+    const result = await callGroq(triggerText, loadConfig(), system);
+    return result.text || 'waduh, otak gue ngeblank bentar coy.';
+}
+
+// MESIN RANGKUMAN
+async function summarizeChatLog(logs) {
+    const chatText = logs.map(l => `${l.senderName}: ${l.text}`).join('\n');
+    const system = `lu adalah perangkum tongkrongan. baca log chat berikut dan rangkum poin pentingnya pakai dots (bullet). bahasanya tetap santai dan asik, pakai kata gue/lu.`;
+    const prompt = `rangkumin obrolan ini:\n${chatText}`;
+    
+    const result = await callGroq(prompt, loadConfig(), system);
+    return result.text || 'lagi ga bisa ngerangkum nih, kepanjangan kayaknya.';
+}
+
+module.exports = { parseIntentFromText, generateMimicReply, summarizeChatLog };
