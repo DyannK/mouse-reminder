@@ -8,14 +8,13 @@ const path = require('path');
 
 const { loadConfig, saveConfig } = require('./configManager');
 const { handleCommand, resolveTargetsToJids, isAuthorized, handleListCommand } = require('./commandHandler');
-const { generateAIText, generateTagReply, parseIntentFromText } = require('./geminiClient');
 const { computeTriggerTimestamp, milestoneKey } = require('./deadlineParser');
 const { computeNextCronFire, formatCronKeTeks } = require('./timeParser');
 const { recordSample, buildStyleInstruction } = require('./styleProfiler');
 const { initTelegramScraper } = require('./telegramScraper');
 
 const { logGroupMessage, getGroupLogs } = require('./chatLogger');
-const { parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
+const { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
 
 const userStates = {};
 
