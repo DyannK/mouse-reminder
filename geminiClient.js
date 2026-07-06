@@ -3,12 +3,9 @@ const { loadConfig } = require('./configManager');
 let currentGeminiIndex = 0;
 let currentGroqIndex = 0;
 
-/**
- * Memanggil API Groq menggunakan fungsi fetch bawaan dengan standar OpenAI completions.
- */
 async function callGroqFallback(prompt, config) {
     const keys = config.groqApiKeys || [];
-    const model = config.groqModel || 'llama-3.3-70b-versatile';
+    const model = config.groqModel || 'gemma2-9b-it';
 
     if (keys.length === 0) {
         return { error: 'Kunci akses Groq kosong.' };
@@ -26,8 +23,6 @@ async function callGroqFallback(prompt, config) {
         const timeoutId = setTimeout(() => controller.abort(), 7000);
 
         try {
-            console.log(`[Hybrid System] Mengalihkan pencarian teks ke Groq (Indeks Kunci: ${activeIndex})...`);
-            
             const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -36,7 +31,14 @@ async function callGroqFallback(prompt, config) {
                 },
                 body: JSON.stringify({
                     model: model,
-                    messages: [{ role: 'user', content: prompt }]
+                    messages: [
+                        { 
+                            role: 'system', 
+                            content: 'Kamu adalah asisten chat yang sangat santai, friendly, dan asik. Gunakan gaya bahasa kasual seperti obrolan tongkrongan sehari-hari di WhatsApp. Gunakan kata gue dan lu secara natural. Jangan pernah menjawab dengan gaya kaku, formal, atau mirip robot admin online shop.' 
+                        },
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.7
                 }),
                 signal: controller.signal
             });
@@ -58,14 +60,10 @@ async function callGroqFallback(prompt, config) {
     return { error: 'Seluruh jalur penyelamat kecerdasan buatan gagal merespons.' };
 }
 
-/**
- * Fungsi utama dengan sistem rotasi kunci Gemini dan pengalihan otomatis ke Groq jika terjadi kendala.
- */
 async function callAIWithHybridRotation(prompt) {
     const config = loadConfig();
     const geminiKeys = config.geminiApiKeys || [];
     
-    // Tahap 1: Coba seluruh baris kunci akses Gemini terlebih dahulu
     if (geminiKeys.length > 0) {
         const maxGeminiAttempts = geminiKeys.length;
 
@@ -104,7 +102,6 @@ async function callAIWithHybridRotation(prompt) {
         }
     }
 
-    // Tahap 2: Jika Gemini habis atau bermasalah, langsung lempar ke Groq
     const groqResult = await callGroqFallback(prompt, config);
     if (groqResult.text) {
         return { text: groqResult.text, provider: 'groq' };
@@ -113,25 +110,26 @@ async function callAIWithHybridRotation(prompt) {
     return { error: groqResult.error };
 }
 
-function buildGayaInstruction(formal) {
-    return formal
-        ? 'Gaya bahasa formal atau baku: pakai kapitalisasi standar di awal kalimat, tata bahasa yang benar, sopan.'
-        : 'Gaya bahasa santai seperti obrolan chat sehari-hari: awal kalimat boleh menggunakan huruf kecil, boleh singkatan wajar, tapi hindari kesan kaku.';
+function buildGayaInstruction() {
+    return 'Gaya bahasa WAJIB sangat santai, natural, mengalir seperti chat sehari-hari. Gunakan huruf kecil di awal kalimat agar terasa manusiawi, boleh pakai singkatan wajar, gunakan panggilan yang akrab, buang total struktur kaku.';
 }
 
 async function generateAIText(tema, context = {}, styleInstruction = null, manualFallback = null, formal = false) {
     const fallbackText = manualFallback || `📌 ${tema}`;
-    
-    let prompt = `Tulis 1 kalimat pengingat singkat dalam Bahasa Indonesia dengan tema: "${tema}".`;
-    if (context.isNow) {
-        prompt += ` PENTING: ini dikirim tepat pada waktunya sekarang, bukan pengingat menjelang — jadi bingkai kalimatnya adalah "sekarang saatnya", bukan "akan datang" atau "menuju".`;
-    } else if (context.sisa) {
-        prompt += ` Info waktu: ${context.sisa}.`;
+    if (formal) {
+        return { text: fallbackText, usedFallback: true };
     }
-    if (context.judul) prompt += ` Judul acara atau tugas: "${context.judul}".`;
-    prompt += ` ${buildGayaInstruction(formal)}`;
+    
+    let prompt = `Tulis 1 kalimat pengingat pendek bertema: "${tema}".`;
+    if (context.isNow) {
+        prompt += ` Sekarang adalah waktu eksekusi acaranya, jadi gunakan konteks bahwa waktu tujuannya adalah sekarang saatnya.`;
+    } else if (context.sisa) {
+        prompt += ` Sisa waktu: ${context.sisa}.`;
+    }
+    if (context.judul) prompt += ` Judul agenda: "${context.judul}".`;
+    prompt += ` ${buildGayaInstruction()}`;
     if (styleInstruction) prompt += ` ${styleInstruction}`;
-    prompt += ` Maksimal 2 kalimat, boleh pakai emoji secukupnya. Jangan sertakan tanda kutip atau backtick pada hasil jawaban jawaban.`;
+    prompt += ` Maksimal 2 kalimat pendek, jangan pakai tanda kutip atau format tebal di hasil jawaban.`;
 
     const result = await callAIWithHybridRotation(prompt);
     if (result.text) return { text: result.text, usedFallback: false };
@@ -140,19 +138,19 @@ async function generateAIText(tema, context = {}, styleInstruction = null, manua
 }
 
 async function generateTagReply(triggerText, styleInstruction = null) {
-    let prompt = `Kamu adalah asisten pengingat di grup WhatsApp. Ada yang memanggil kamu melalui tag dengan pesan: "${triggerText}". Balas singkat maksimal 2 kalimat, santai, dan nyambung dengan konteks pembicaraannya. Boleh gunakan emoji yang umum. Jangan sertakan tanda kutip pada jawaban.`;
+    let prompt = `Kamu adalah teman yang asik di grup WhatsApp. Seseorang memanggil lu dengan pesan: "${triggerText}". Balas pendek maksimal 2 kalimat, santai, nyambung, dan gunakan gaya chat tongkrongan. ${buildGayaInstruction()}`;
     if (styleInstruction) prompt += ` ${styleInstruction}`;
 
     const result = await callAIWithHybridRotation(prompt);
-    return result.text || null;
+    return result.text || 'oi, ada apa coy?';
 }
 
 async function parseIntentFromText(triggerText) {
-    const prompt = `Analisis kalimat pengguna berikut untuk mendeteksi apakah mereka bermaksud membuat pengingat atau jadwal baru.\n\nKalimat: "${triggerText}"\n\nKembalikan jawaban eksklusif berupa JSON mentah utuh tanpa menggunakan format markdown block. Struktur objek JSON wajib memiliki properti berikut:\n- isReminder (boolean)\n- type ("recurring" atau "deadline" atau null)\n- judul (string atau null)\n- waktu (string format HH:MM atau DD-MM-YYYY HH:MM atau null)\n- milestones (string atau null, contoh: "1hari,2jam")\n- isGroupTask (boolean, true jika ada kata kita atau kelompok atau tim)\n- replyPasif (string, jika isReminder false, isi dengan kalimat balasan santai dan adaptif untuk menanggapi obrolan mereka).`;
+    const prompt = `Analisis kalimat dari pengguna ini secara ketat untuk mendeteksi pembuatan jadwal.\n\nKalimat: "${triggerText}"\n\nKembalikan jawaban dalam bentuk JSON mentah tanpa format markdown block. Aturan validasi:\n1. Jika pengguna berniat membuat pengingat/jadwal/deadline tetapi tidak menyebutkan waktu secara spesifik atau jamnya tidak jelas, properti isReminder WAJIB diisi false.\n2. Jika judul tidak disebutkan atau tidak bisa ditebak dari konteks kalimat, properti isReminder WAJIB diisi false.\n\nStruktur JSON:\n{\n  "isReminder": boolean,\n  "type": "recurring" atau "deadline" atau null,\n  "judul": string atau null,\n  "waktu": string format "HH:MM" atau "DD-MM-YYYY HH:MM" atau null,\n  "milestones": string atau null,\n  "isGroupTask": boolean,\n  "replyPasif": string (isi dengan kalimat penolakan santai jika isReminder false karena detail kurang lengkap, atau balas obrolan biasa mereka secara kasual)\n}`;
     
     const result = await callAIWithHybridRotation(prompt);
     if (!result.text) {
-        return { isReminder: false, replyPasif: 'Jalur pemrosesan kecerdasan buatan sedang penuh, coba sesaat lagi ya.' };
+        return { isReminder: false, replyPasif: 'Jalur AI lagi padat nih, coba sebentar lagi ya.' };
     }
 
     try {
@@ -160,7 +158,7 @@ async function parseIntentFromText(triggerText) {
         return JSON.parse(cleanJson);
     } catch (err) {
         console.error('Gagal mengurai JSON intent:', result.text);
-        return { isReminder: false, replyPasif: 'Gagal memproses format teks perintah.' };
+        return { isReminder: false, replyPasif: 'Format kalimat lu agak membingungkan nih, coba diperjelas lagi detailnya.' };
     }
 }
 
