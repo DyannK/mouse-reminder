@@ -131,7 +131,6 @@ async function generateTagReply(triggerText, styleInstruction = null) {
 async function parseIntentFromText(triggerText) {
     const lowText = triggerText.toLowerCase();
 
-    // SENSOR AKSES RADAR DETAIL JADWAL KASUAL
     const readKeywords = ['lihat', 'liat', 'cek', 'tampilkan', 'tampilin', 'list', 'info', 'ada apa aja', 'gimana aja'];
     const scheduleKeywords = ['jadwal', 'agenda', 'deadline', 'ingetan', 'listnya', 'list'];
     
@@ -145,23 +144,22 @@ async function parseIntentFromText(triggerText) {
         return { intent: 'read_schedule', judul: null, waktu: null, jumlahChat: 200 };
     }
 
-    if (lowText.includes('rangkum') || lowText.includes('rangkumin') || lowText.includes('summary')) {
-        const match = lowText.match(/\d+/);
-        const jumlahChat = match ? parseInt(match[0], 10) : 200;
-        return { intent: 'summarize', judul: null, waktu: null, jumlahChat };
-    }
-
     let system = `lu adalah mesin pembaca niat khusus bahasa indonesia. analisa kalimat dan kembalikan JSON murni.
 pilihan intent:
-1. "create_schedule": jika pengguna ingin membuat jadwal/reminder/deadline DAN menyebutkan jam serta judul agenda secara eksplisit.
+1. "create_schedule": jika pengguna ingin membuat jadwal atau reminder atau deadline DAN menyebutkan jam serta judul aktivitas.
 2. "chat": jika hanya mengobrol biasa atau menyapa.
+
+ekstraksi rincian interval waktu pengingat secara cerdas jika disebutkan di chat, misal tiap menit diartikan intervalMinutes: 1, per-2 menit diartikan intervalMinutes: 2. jika ada kata pesan tulislah isinya di parameter pesan. jika ada nama orang yang dituju masukkan ke extractedTarget.
 
 format output json murni:
 {
   "intent": "create_schedule" | "chat",
   "judul": "string atau null",
   "waktu": "string format HH:MM atau null",
-  "jumlahChat": 200
+  "intervalMinutes": number atau null,
+  "startTime": "string format HH:MM atau null",
+  "pesan": "string atau null",
+  "extractedTarget": "string atau null"
 }`;
 
     const createKeywords = ['bikin', 'buat', 'ingetin', 'set', 'tambah', 'remind', 'buatkan', 'buatin', 'creating'];

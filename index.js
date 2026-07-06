@@ -42,7 +42,109 @@ function setState(jid, mode, data = {}) {
     };
 }
 
-// FORMAT PARSER DETAIL INTERNAL JADWAL DATABASE
+// DEKODER FORMULASI MANUSIA UNTUK CRON PATTERN (BACKEND TRANSLATION ENGINE)
+function translateCronToHuman(cronPattern) {
+    const parts = cronPattern.split(' ');
+    if (parts.length !== 5) return cronPattern;
+    const [min, hour, date, month, day] = parts;
+    let desc = 'Berjalan';
+    if (min === '*' && hour === '*') desc += ' setiap menit';
+    else if (min.startsWith('*/') && hour === '*') desc += ` kelipatan ${min.split('/')[1]} menit`;
+    else desc += ` setiap jam ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
+    
+    if (date !== '*') desc += ` pada tanggal ${date}`;
+    if (month !== '*') desc += ` di bulan ke-${month}`;
+    if (day !== '*') {
+        const daysArr = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+        desc += ` setiap hari ${daysArr[parseInt(day, 10)] || day}`;
+    }
+    return desc;
+}
+
+// KALKULATOR MATEMATIKA DERET MUNDUR MILESTONES INTERVAL
+function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin) {
+    let now = new Date();
+    if (!waktuTarget || !waktuTarget.includes(':')) {
+        return [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }];
+    }
+    let [tHour, tMin] = waktuTarget.split(':').map(Number);
+    let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), tHour, tMin, 0);
+    if (targetDate.getTime() <= now.getTime()) {
+        targetDate.setDate(targetDate.getDate() + 1);
+    }
+
+    let startDate = new Date(now.getTime());
+    if (waktuMulaiStr && waktuMulaiStr.includes(':')) {
+        let [sHour, sMin] = waktuMulaiStr.split(':').map(Number);
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sHour, sMin, 0);
+        if (startDate.getTime() > targetDate.getTime()) {
+            startDate.setDate(startDate.getDate() - 1);
+        }
+    }
+
+    const diffMs = targetDate.getTime() - startDate.getTime();
+    const diffMin = Math.floor(diffMs / (60 * 1000));
+
+    let milestones = [];
+    let step = (intervalMin && intervalMin > 0) ? intervalMin : 0;
+
+    if (diffMin <= 0 || step === 0) {
+        return [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }];
+    }
+
+    for (let minRemaining = 0; minRemaining <= diffMin; minRemaining += step) {
+        milestones.push({
+            type: 'durasi',
+            totalMinutes: minRemaining,
+            label: minRemaining === 0 ? 'sekarang' : `${minRemaining} menit lagi`,
+            isAuto: minRemaining === 0
+        });
+    }
+
+    return milestones.sort((a, b) => b.totalMinutes - a.totalMinutes);
+}
+
+// ARSITEKTUR PANEL KONFIRMASI TRANS-BAHASA MANUSIA SUPER DETAIL
+async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
+    const config = loadConfig();
+    const isGroup = fromJid.endsWith('@g.us');
+    
+    let targetName = 'Pribadi (Gue)';
+    if (data.extractedTarget) {
+        const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
+        if (foundContact) targetName = `Personal ke Nomor ${foundContact.name} (${foundContact.jid.split('@')[0]})`;
+        else targetName = `Personal ke ${data.extractedTarget} (Belum ada di daftar kontak)`;
+    } else if (isGroup) {
+        try {
+            const metadata = await sock.groupMetadata(fromJid);
+            const memberNames = metadata.participants.map(p => config.accountMapping[p.id] || p.id.split('@')[0]);
+            targetName = `Kelompok di Grup ini (Anggota: ${memberNames.slice(0, 6).join(', ')}${memberNames.length > 6 ? '... dan lainnya' : ''})`;
+        } catch {
+            targetName = `Kelompok Kelompok`;
+        }
+    }
+
+    const intervalVal = data.intervalMinutes || 1;
+    const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
+
+    let confirmationText = `📋 *[PRALATAN KONFIRMASI AGENDA]*\n` +
+        `• *Judul Aktivitas*: ${data.judul || 'Agenda Kasual'}\n` +
+        `• *Waktu Sasaran*: Jam ${data.waktu || 'Belum diset'} WIB\n` +
+        `• *Target Penerima*: ${targetName}\n` +
+        `• *Skema Alarm*: ${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)\n` +
+        `• *Muatan Isi Pesan*: "${data.pesan || `waktunya {judul} bentar lagi nih!`}"\n\n` +
+        `📝 *Sistem Pengubah Parameter Diterima*:\n` +
+        `Lu bisa langsung ketik kalimat kasual untuk mengubah manifes di atas secara langsung. Contoh:\n` +
+        `- _"ganti judul jadi rapat kelompok"_\n` +
+        `- _"ganti jam jadi 15:45"_\n` +
+        `- _"ganti pesan jadi kumpul bray"_\n` +
+        `- _"ganti interval jadi 5 menit"_\n\n` +
+        `Balas *IYA* untuk mengunci memori dan menyimpan agenda ini.`;
+
+    await sock.sendMessage(fromJid, { text: confirmationText }, { quoted: quotedMsg });
+}
+
+// FORMAT PARSER DETAIL INTERNAL JADWAL DATABASE (CLEAN FROM RAW CRON)
 async function handleListDetail(sock, fromJid) {
     const config = loadConfig();
     const reminders = config.reminders || [];
@@ -59,12 +161,12 @@ async function handleListDetail(sock, fromJid) {
             const d = new Date(r.targetTimestamp);
             msg += `• waktu: ${d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB\n`;
         }
-        if (r.cronPattern) msg += `• cron: \`${r.cronPattern}\`\n`;
+        if (r.cronPattern) msg += `• aturan pengulangan: ${translateCronToHuman(r.cronPattern)}\n`;
         msg += `• template: "${r.message}"\n`;
         if (r.milestones && r.milestones.length > 0) {
             msg += `• milestones:\n`;
             r.milestones.forEach(m => {
-                msg += `  - [${m.label}] (${m.type}: ${m.totalMinutes || 0} mnt)\n`;
+                msg += `  - [${m.label}] (durasi: ${m.totalMinutes || 0} mnt)\n`;
             });
         }
         if (r.mediaPath) msg += `• berkas media: ${path.basename(r.mediaPath)}\n`;
@@ -322,7 +424,7 @@ async function startBot() {
 
         const fromJid = msg.remoteJid || msg.key.remoteJid;
         const isGroup = fromJid.endsWith('@g.us');
-        const senderName = msg.pushName || 'Orang';
+        const senderName = msg.pushName || 'orang';
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
         let config = loadConfig();
@@ -336,23 +438,27 @@ async function startBot() {
             resetState(fromJid);
             const cmd = text.trim().toLowerCase();
             if (cmd === '/help') {
-                const menuHelp = `🛠 *MENU UTAMA BANTUAN REMINDER BOT*\n` +
+                const menuHelp = `🛠 *MENU UTAMA BANTUAN SINTAKSIS REMINDER BOT*\n` +
                     `--------------------------------------------------------\n\n` +
-                    `📌 *PERINTAH MANUAL (SLASH COMMAND)*\n` +
-                    `• */list* : Menampilkan agenda aktif secara ringkas.\n` +
-                    `• */listdetail* : Membedah data parameter jadwal secara mentah.\n` +
-                    `• */daftar* : Registrasi izin akses kontrol peladen.\n` +
-                    `• */tambah* : Membuat alarm harian/rutin manual.\n` +
-                    `• */tambahdeadline* : Membuat target deadline manual.\n` +
-                    `• */editpesan [id] [teks]* : Mengubah template durasi (bisa pakai *AI:* atau *{judul}*).\n` +
-                    `• */editpesannow [id] [teks]* : Mengubah template eksekusi tepat waktu.\n\n` +
-                    `🤖 *FITUR KASUAL CERDAS (AI MODE)*\n` +
-                    `Tag bot di grup atau japri langsung pakai bahasa sehari-hari:\n` +
-                    `• *Bikin Jadwal* : "buatin gue jadwal mancing jam 18:15 ntar malem"\n` +
-                    `• *Cek Agenda* : "coba liat dong jadwal versi detailnya"\n` +
-                    `• *Rangkum Chat* : "200 bubble ke atas kita ngomongin apa rangkumin"\n\n` +
-                    `💬 *ATURAN SESI CHAT & MIMICKING*\n` +
-                    `• Putus sesi obrolan kapan saja dengan mengetik kata penutup (*sip*, *oke*, *udahan*, dll).`;
+                    `📌 *PENGELOLAAN AGENDA MANUAL*\n` +
+                    `• */tambah [Menit] [Jam] [Tgl] [Bulan] [Hari] | [Pesan]*\n` +
+                    `  _Definisi_: Membuat pengingat alarm rutin jangka panjang.\n` +
+                    `  _Contoh_: \`/tambah 0 7 * * * | bangun bray, kuliah!\`\n\n` +
+                    `• */tambahdeadline [DD-MM-YYYY HH:MM] | [Judul] | [Milestones]*\n` +
+                    `  _Definisi_: Membuat target deadline satu kali eksekusi.\n` +
+                    `  _Contoh_: \`/tambahdeadline 07-07-2026 13:00 | Uas Elka | 1hari,2jam\`\n\n` +
+                    `• */editpesan [id_agenda] [teks_template]*\n` +
+                    `  _Definisi_: Mengubah isi teks pengingat durasi mundur.\n` +
+                    `  _Contoh_: \`/editpesan ai_1510 AI:ingetin waktu kurang {sisa}\`\n\n` +
+                    `• */editpesannow [id_agenda] [teks_template]*\n` +
+                    `  _Definisi_: Mengubah isi teks pengingat pas waktu eksekusi.\n` +
+                    `  _Contoh_: \`/editpesannow ai_1510 sekarang waktunya {judul}!\`\n\n` +
+                    `📌 *PEMERIKSAAN & ANALISIS OBROLAN*\n` +
+                    `• */list* : Menampilkan seluruh daftar agenda secara singkat.\n` +
+                    `• */listdetail* : Membedah parameter isi database secara transparan.\n` +
+                    `• */rangkuman [jumlah_bubble]*\n` +
+                    `  _Definisi_: Merangkum sejarah chat grup menjadi poin ringkas.\n` +
+                    `  _Contoh_: \`/rangkuman 200\``;
 
                 await sock.sendMessage(fromJid, { text: menuHelp }, { quoted: msg });
                 return;
@@ -361,6 +467,27 @@ async function startBot() {
                 await handleListDetail(sock, fromJid);
                 return;
             }
+            if (cmd.startsWith('/rangkuman')) {
+                const bubbleCount = parseInt(cmd.replace('/rangkuman', '').trim(), 10) || 200;
+                const logs = getGroupLogs(bubbleCount);
+                if (logs.length === 0) {
+                    await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam bray.' });
+                } else {
+                    await sock.sendMessage(fromJid, { text: 'bentar, gue rangkumin dulu ya...' });
+                    const summary = await summarizeChatLog(logs);
+                    await sock.sendMessage(fromJid, { text: summary });
+                }
+                return;
+            }
+            
+            if (cmd.startsWith('/tambah ') && text.includes('|')) {
+                const parts = text.slice(8).split('|');
+                const pattern = parts[0].trim();
+                const pesan = parts[1].trim();
+                const humanDesc = translateCronToHuman(pattern);
+                await sock.sendMessage(fromJid, { text: `📋 *[VERIFIKASI MANUAL BACKEND]*\nSistem menerjemahkan perintah manual lu:\n• Tipe: Rutin Berulang\n• Pola Kerja: ${humanDesc}\n• Muatan Pesan: "${pesan}"\n\nAgenda langsung diamankan ke scheduler.` });
+            }
+
             await handleCommand(sock, text, fromJid, () => setupSchedules(sock));
             return;
         }
@@ -389,13 +516,50 @@ async function startBot() {
 
         const lowText = text.trim().toLowerCase();
 
-        // 4. KONDISI LOCK STATUS: KONFIRMASI JADWAL DUA LANGKAH (REGULAR EXPRESSION MATCH)
+        // 4. KONDISI LOCK INTERAKTIF: REKAYASA EDIT CASUAL DI TENGAH SESI KONFIRMASI
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
             const state = userStates[fromJid];
             
             if (['gajadi', 'batal', 'cancel', 'ntar aja'].some(w => lowText.includes(w))) {
                 resetState(fromJid);
                 await sock.sendMessage(fromJid, { text: 'oke bray, pembuatan jadwal dibatalin ya.' }, { quoted: msg });
+                return;
+            }
+
+            if (/ganti judul|ubah judul/i.test(lowText)) {
+                state.data.judul = text.replace(/ganti judul jadi|ubah judul jadi|ganti judul|ubah judul/gi, '').trim();
+                await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                return;
+            }
+            if (/ganti jam|ubah jam|ganti waktu|ubah waktu/i.test(lowText)) {
+                const foundTime = text.match(/\d{2}:\d{2}/)?.[0];
+                if (foundTime) state.data.waktu = foundTime;
+                await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                return;
+            }
+            if (/ganti pesan|ubah pesan|ganti isi|ubah isi/i.test(lowText)) {
+                state.data.pesan = text.replace(/ganti pesan jadi|ubah pesan jadi|ganti pesan|ubah pesan|ganti isi jadi|ubah isi jadi/gi, '').trim();
+                await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                return;
+            }
+            if (/ganti interval|ubah interval|tiap|per/i.test(lowText)) {
+                const matchDigits = lowText.match(/\d+/);
+                if (matchDigits) {
+                    let min = parseInt(matchDigits[0], 10);
+                    if (lowText.includes('jam')) min *= 60;
+                    state.data.intervalMinutes = min;
+                }
+                await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                return;
+            }
+            if (/ganti target|ubah target/i.test(lowText)) {
+                state.data.extractedTarget = text.replace(/ganti target jadi|ubah target jadi|ganti target|ubah target/gi, '').trim();
+                await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                return;
+            }
+            if (/hapus target/i.test(lowText)) {
+                state.data.extractedTarget = null;
+                await sendDetailedConfirmation(sock, fromJid, state.data, msg);
                 return;
             }
 
@@ -410,27 +574,40 @@ async function startBot() {
                     const [hour, minute] = data.waktu.split(':').map(Number);
                     const hariIni = new Date();
                     const targetDate = new Date(hariIni.getFullYear(), hariIni.getMonth(), hariIni.getDate(), hour, minute, 0);
-                    
                     if (targetDate.getTime() <= Date.now()) {
                         targetDate.setDate(targetDate.getDate() + 1);
                     }
                     targetTimestamp = targetDate.getTime();
                 }
 
+                const intervalVal = data.intervalMinutes || 1;
+                const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
+
+                let targetJidFinal = fromJid;
+                let finalScope = isGroup ? 'group' : 'personal';
+                
+                if (data.extractedTarget) {
+                    const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
+                    if (foundContact) {
+                        targetJidFinal = foundContact.jid;
+                        finalScope = 'personal';
+                    }
+                }
+
                 config.reminders.push({
                     id: `ai_${Date.now().toString().slice(-4)}`,
                     type: 'deadline',
-                    scope: isGroup ? 'group' : 'personal',
+                    scope: finalScope,
                     targetTimestamp: targetTimestamp,
                     judul: data.judul || 'Agenda Kasual',
-                    message: `waktunya {judul} bentar lagi nih!`,
+                    message: data.pesan || `waktunya {judul} bentar lagi nih!`,
                     manualFallback: data.judul || 'Agenda Kasual',
-                    nowMessage: `sekarang waktunya {judul} coy!`,
+                    nowMessage: `sekarang waktunya ${data.judul || 'Agenda Kasual'} coy!`,
                     nowManualFallback: data.judul || 'Agenda Kasual',
-                    milestones: [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }],
+                    milestones: finalMilestones,
                     firedMilestones: [],
                     pendingAITexts: {},
-                    targets: [isGroup ? 'group' : fromJid],
+                    targets: [finalScope === 'group' ? 'group' : targetJidFinal],
                     mediaPath: null,
                     mediaType: null,
                     teamTracking: {}
@@ -449,7 +626,33 @@ async function startBot() {
             return;
         }
 
-        // 5. PENYARING ANTREN RADAR NIAT (INTENT PARSER EVALUATOR)
+        // 5. INTERLOCK PEMBATALAN OVER-LIMIT DEBAT INTERAKTIF MILESTONES
+        if (userStates[fromJid] && userStates[fromJid].mode === 'interval_correction') {
+            const state = userStates[fromJid];
+            const matchDigits = lowText.match(/\d+/);
+            if (matchDigits) {
+                let newInterval = parseInt(matchDigits[0], 10);
+                if (lowText.includes('jam')) newInterval *= 60;
+                
+                state.data.originalData.intervalMinutes = newInterval;
+                const testMilestones = calculateMilestonesArray(state.data.originalData.waktu, state.data.originalData.startTime, newInterval);
+                
+                if (testMilestones.length <= 30) {
+                    setState(fromJid, 'confirm_schedule', state.data.originalData);
+                    await sendDetailedConfirmation(sock, fromJid, state.data.originalData, msg);
+                } else {
+                    await sock.sendMessage(fromJid, { text: `masih kebanyakan bray (${testMilestones.length} kali). gempor gue gila, coba gedein lagi menit atau jamnya.` });
+                }
+            } else if (['gajadi', 'batal', 'cancel'].some(w => lowText.includes(w))) {
+                resetState(fromJid);
+                await sock.sendMessage(fromJid, { text: 'oke sip, gue reset.' });
+            } else {
+                await sock.sendMessage(fromJid, { text: 'coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit atau berapa jam?' });
+            }
+            return;
+        }
+
+        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (INTENT PARSER EVALUATOR)
         const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
         const isBotMentioned = mentionedJids.some(j => j.split(':')[0] === botJidNumber);
 
@@ -462,8 +665,16 @@ async function startBot() {
             const intentData = await parseIntentFromText(text);
 
             if (intentData.intent === 'create_schedule') {
+                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1);
+                
+                if (calculated.length > 30) {
+                    setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
+                    await sock.sendMessage(fromJid, { text: `ini yakin gue ngingetin ${calculated.length} kali? gempor gue gila bray, peladen bisa meledak. coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit?` });
+                    return;
+                }
+
                 setState(fromJid, 'confirm_schedule', intentData);
-                await sock.sendMessage(fromJid, { text: `gue nangkep lu mau bikin jadwal ${intentData.judul} jam ${intentData.waktu}. mau lanjut chatan aja, atau fix buat agenda nih? bales iya kalau fix.` });
+                await sendDetailedConfirmation(sock, fromJid, intentData, msg);
             
             } else if (intentData.intent === 'summarize') {
                 const logs = getGroupLogs(intentData.jumlahChat || 200);
@@ -484,7 +695,6 @@ async function startBot() {
                 await handleCommand(sock, '/list', fromJid, () => setupSchedules(sock));
                 
             } else {
-                // EVALUASI STRUKTUR SAKELAR BASA-BASI
                 if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke'].some(w => lowText === w || lowText.includes(w))) {
                     if (userStates[fromJid] && userStates[fromJid].mode === 'chat') {
                         resetState(fromJid);
@@ -501,6 +711,7 @@ async function startBot() {
         }
         
         if (text && (!isGroup || isBotMentioned)) {
+            // Memory profiling system updated securely to record up to 50 samples
             recordSample(isGroup ? (msg.key.participant || fromJid) : fromJid, text);
         }
     });
