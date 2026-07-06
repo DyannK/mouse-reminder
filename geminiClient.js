@@ -1,27 +1,57 @@
 const { loadConfig } = require('./configManager');
 
+let currentKeyIndex = 0;
+
 /**
- * Generate teks reminder pakai Gemini API.
- * context: { sisa, judul, isNow } - isNow=true artinya ini pesan yang dikirim TEPAT PAS
- *          waktunya (bukan pengingat sebelumnya), pengaruh ke framing kalimat.
- * styleInstruction: hasil dari styleProfiler.buildStyleInstruction (boleh null).
- * formal: true/false - kalau true pakai kapitalisasi & bahasa baku, kalau false santai/lowercase.
- * manualFallback: teks fallback wajib kalau tema di-generate lewat AI, dipakai kalau gagal.
- *
- * Return { text, usedFallback }. Fungsi ini JANGAN PERNAH throw.
+ * Eksekusi panggilan API Gemini dengan sistem proteksi waktu tunggu dan rotasi kunci otomatis.
  */
-async function callGemini(prompt, apiKey) {
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+async function callGeminiWithRotation(prompt) {
+    const config = loadConfig();
+    const keys = config.geminiApiKeys || [];
+    
+    if (keys.length === 0) {
+        return { error: 'Kunci API Gemini belum diisi di berkas konfigurasi.' };
+    }
+
+    const maxAttempts = keys.length;
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const activeIndex = (currentKeyIndex + attempt) % keys.length;
+        const apiKey = keys[activeIndex];
+
+        if (!apiKey || apiKey.includes('ISI_')) continue;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+        try {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+                    signal: controller.signal
+                }
+            );
+
+            const data = await res.json();
+            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+            if (text) {
+                currentKeyIndex = activeIndex; // Kunci sukses disimpan sebagai indeks utama
+                return { text: text.trim(), status: res.status };
+            }
+            
+            console.error(`Kunci indeks ${activeIndex} gagal memberikan teks respons. Mencoba kunci cadangan berikutnya...`);
+        } catch (err) {
+            console.error(`Kendala pada kunci indeks ${activeIndex} (${err.message}). Beralih ke kunci cadangan...`);
+        } finally {
+            clearTimeout(timeoutId);
         }
-    );
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return { text, raw: data, status: res.status };
+    }
+
+    return { error: 'Seluruh kunci akses cadangan Gemini gagal merespons atau kehabisan kuota harian.' };
 }
 
 function buildGayaInstruction(formal) {
@@ -31,14 +61,8 @@ function buildGayaInstruction(formal) {
 }
 
 async function generateAIText(tema, context = {}, styleInstruction = null, manualFallback = null, formal = false) {
-    const config = loadConfig();
-    const apiKey = config.geminiApiKey;
     const fallbackText = manualFallback || `📌 ${tema}`;
-
-    if (!apiKey || apiKey.includes('ISI_')) {
-        return { text: `⚠️ [AI belum dikonfigurasi] ${tema}`, usedFallback: true };
-    }
-
+    
     let prompt = `Tulis 1 kalimat pengingat singkat dalam Bahasa Indonesia dengan tema: "${tema}".`;
     if (context.isNow) {
         prompt += ` PENTING: ini dikirim TEPAT PAS waktunya sekarang (eksekusi), BUKAN pengingat menjelang — jadi framing-nya "sekarang saatnya", bukan "akan datang" atau "menuju".`;
@@ -50,45 +74,36 @@ async function generateAIText(tema, context = {}, styleInstruction = null, manua
     if (styleInstruction) prompt += ` ${styleInstruction}`;
     prompt += ` Maksimal 2 kalimat, boleh pakai emoji secukupnya. Jangan pakai tanda kutip di jawaban.`;
 
-    const MAX_ATTEMPTS = 2;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        try {
-            const { text, raw, status } = await callGemini(prompt, apiKey);
-            if (text) return { text: text.trim(), usedFallback: false };
-
-            console.error(`Gemini gagal (percobaan ${attempt}/${MAX_ATTEMPTS}), status ${status}:`, JSON.stringify(raw));
-            if (status === 503 && attempt < MAX_ATTEMPTS) {
-                await new Promise(r => setTimeout(r, 3000));
-                continue;
-            }
-            return { text: fallbackText, usedFallback: true };
-        } catch (err) {
-            console.error(`Gagal generate teks AI (percobaan ${attempt}/${MAX_ATTEMPTS}):`, err);
-            if (attempt < MAX_ATTEMPTS) {
-                await new Promise(r => setTimeout(r, 3000));
-                continue;
-            }
-            return { text: fallbackText, usedFallback: true };
-        }
-    }
+    const result = await callGeminiWithRotation(prompt);
+    if (result.text) return { text: result.text, usedFallback: false };
+    
+    return { text: fallbackText, usedFallback: true };
 }
 
-/** Generate balasan kontekstual singkat waktu bot di-tag di grup (fitur "chat mode"). */
 async function generateTagReply(triggerText, styleInstruction = null) {
-    const config = loadConfig();
-    const apiKey = config.geminiApiKey;
-    if (!apiKey || apiKey.includes('ISI_')) return null; // diam aja kalau AI belum dikonfigurasi
-
     let prompt = `Kamu adalah asisten reminder di grup WhatsApp. Ada yang nge-tag/mention kamu dengan pesan: "${triggerText}". Balas singkat (maks 2 kalimat), santai, dan nyambung sama konteks pesannya. Boleh emoji secukupnya. Jangan pakai tanda kutip di jawaban.`;
     if (styleInstruction) prompt += ` ${styleInstruction}`;
 
+    const result = await callGeminiWithRotation(prompt);
+    return result.text || null;
+}
+
+/**
+ * Pembedah kalimat kasual untuk mendeteksi apakah pengguna ingin membuat jadwal produktif atau sekadar mengobrol.
+ */
+async function parseIntentFromText(triggerText) {
+    const prompt = `Analisis kalimat dari pengguna berikut untuk menentukan apakah mereka berniat membuat pengingat/jadwal/tenggat waktu baru atau tidak.\n\nKalimat: "${triggerText}"\n\nKembalikan jawaban dalam bentuk JSON mentah utuh TANPA menggunakan format markdown block. Struktur JSON harus memiliki kolom: \n- isReminder (boolean)\n- type ("recurring" atau "deadline" atau null)\n- judul (string atau null)\n- waktu (string format DD-MM-YYYY HH:MM atau HH:MM saja atau null)\n- milestones (string atau null, misal "1hari,2jam")\n- isGroupTask (boolean, true jika ada kata "kita", "kelompok", "tim")\n- replyPasif (string, jika isReminder false, isi dengan kalimat balasan santai untuk menanggapi obrolan mereka).`;
+    
+    const result = await callGeminiWithRotation(prompt);
+    if (!result.text) return { isReminder: false, replyPasif: 'Akses kecerdasan buatan sedang sibuk, coba lagi nanti ya.' };
+
     try {
-        const { text } = await callGemini(prompt, apiKey);
-        return text ? text.trim() : null;
+        const cleanJson = result.text.replace(/```json|```/g, '').trim();
+        return JSON.parse(cleanJson);
     } catch (err) {
-        console.error('Gagal generate balasan tag:', err);
-        return null;
+        console.error('Gagal membedah format JSON intent:', result.text);
+        return { isReminder: false, replyPasif: 'Akses pemrosesan pesan mengalami kendala format.' };
     }
 }
 
-module.exports = { generateAIText, generateTagReply };
+module.exports = { generateAIText, generateTagReply, parseIntentFromText };
