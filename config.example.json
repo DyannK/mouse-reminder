@@ -5,6 +5,10 @@
     "KEY_API_GEMINI_1",
     "KEY_API_GEMINI_2"
   ],
+  "groqApiKeys": [
+    "KEY_API_GROQ_1",
+    "KEY_API_GROQ_2"
+  ],
   "authorizedUsers": [],
   "groupJid": "120235461651121@g.us",
   "accountMapping": {
