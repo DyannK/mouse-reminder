@@ -192,13 +192,17 @@ aturan mutlak:
     return result.text || 'waduh, otak gue ngeblank bentar coy.';
 }
 
-async function summarizeChatLog(logs) {
-    const chatText = logs.map(l => `${l.senderName}: ${l.text}`).join('\n');
-    const system = `lu adalah perangkum tongkrongan. baca log chat berikut dan rangkum poin pentingnya menggunakan poin-poin. bahasanya tetap santai dan asik, pakai kata gue/lu.`;
-    const prompt = `rangkumin obrolan ini:\n${chatText}`;
+// GENERATOR RESUPON STATUS INTEGRASI GAYA AI INTERAKTIF KHUSUS STATE MACHINE
+async function generateCasualStateReply(actionContext, recentSamples) {
+    const system = `lu adalah temen nongkrong di wa. tugas lu adalah menyampaikan pesan status sistem ini kepada user: "${actionContext}".
+Aturan mutlak:
+1. sampaikan esensi atau arti dari pesan sistem tersebut secara jelas, jangan sampai hilang maksud aslinya.
+2. bungkus pesan tersebut 100% menggunakan gaya bahasa kasual tongkrongan wa, pakai kata gue/lu.
+3. pelajari dan tiru gaya ketikan unik user dari histori sampel berikut: ${recentSamples.join(' | ')}
+4. jangan pernah kaku kayak robot, buat se-natural mungkin seolah lu temennya yang lagi ngebalas chat chat biasa.`;
     
-    const result = await callAIWithHybridRotation(prompt, false, system);
-    return result.text || 'lagi ga bisa ngerangkum nih, kepanjangan kayaknya.';
+    const result = await callAIWithHybridRotation(`sampaikan pesan ini dengan gaya user: ${actionContext}`, false, system);
+    return result.text || actionContext;
 }
 
-module.exports = { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, summarizeChatLog };
+module.exports = { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, generateCasualStateReply, summarizeChatLog };
