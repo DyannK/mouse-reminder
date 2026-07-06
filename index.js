@@ -14,7 +14,7 @@ const { recordSample, buildStyleInstruction } = require('./styleProfiler');
 const { initTelegramScraper } = require('./telegramScraper');
 
 const { logGroupMessage, getGroupLogs } = require('./chatLogger');
-const { generateAIText, parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
+const { generateAIText, generateTagReply, parseIntentFromText, generateMimicReply, summarizeChatLog } = require('./geminiClient');
 
 const userStates = {};
 
@@ -42,7 +42,37 @@ function setState(jid, mode, data = {}) {
     };
 }
 
-// MESIN PENERJEMAH TEMPLATE MANUAL DAN GENERATOR AI
+// FORMAT PARSER DETAIL INTERNAL JADWAL DATABASE
+async function handleListDetail(sock, fromJid) {
+    const config = loadConfig();
+    const reminders = config.reminders || [];
+    if (reminders.length === 0) {
+        await sock.sendMessage(fromJid, { text: 'jadwal lu lagi kosong bersih bray.' });
+        return;
+    }
+    let msg = `📋 *[DAFTAR AGENDA DETAIL]*\n\n`;
+    reminders.forEach((r, idx) => {
+        msg += `*${idx + 1}. [${r.judul}]* (ID: ${r.id})\n`;
+        msg += `• tipe: ${r.type}\n`;
+        msg += `• scope: ${r.scope}\n`;
+        if (r.targetTimestamp) {
+            const d = new Date(r.targetTimestamp);
+            msg += `• waktu: ${d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB\n`;
+        }
+        if (r.cronPattern) msg += `• cron: \`${r.cronPattern}\`\n`;
+        msg += `• template: "${r.message}"\n`;
+        if (r.milestones && r.milestones.length > 0) {
+            msg += `• milestones:\n`;
+            r.milestones.forEach(m => {
+                msg += `  - [${m.label}] (${m.type}: ${m.totalMinutes || 0} mnt)\n`;
+            });
+        }
+        if (r.mediaPath) msg += `• berkas media: ${path.basename(r.mediaPath)}\n`;
+        msg += `-------------------------------------------\n`;
+    });
+    await sock.sendMessage(fromJid, { text: msg.trim() });
+}
+
 async function resolveTemplateForJid(messageTemplate, manualFallback, jid, context = {}, formal = false) {
     if ((messageTemplate || '').startsWith('AI:')) {
         const tema = messageTemplate.replace('AI:', '').trim();
@@ -55,7 +85,6 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
     return { text, usedFallback: false };
 }
 
-// TRANSMISI PESAN DENGAN KAMAR AUDIO VISUAL DAN MEDIA BUFFER
 async function deliverToJids(sock, reminder, targetTextMap) {
     for (const [jid, text] of Object.entries(targetTextMap)) {
         try {
@@ -80,7 +109,6 @@ async function deliverToJids(sock, reminder, targetTextMap) {
     }
 }
 
-// DISTRIBUSI DEADLINE KE ANGGOTA KELOMPOK SECARA MANDIRI
 async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
     try {
         const groupMeta = await sock.groupMetadata(config.groupJid);
@@ -110,7 +138,6 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
     }
 }
 
-// GENERATOR LAPORAN JURNAL KEAKTIFAN ANGGOTA TIM
 async function generateAndSendTeamReport(sock, reminder, config) {
     let report = `*[laporan keaktifan kelompok]*\nagenda: *[${reminder.judul}]*\n\n`;
 
@@ -145,7 +172,6 @@ async function generateAndSendTeamReport(sock, reminder, config) {
     await sock.sendMessage(config.groupJid, { text: report.trim() });
 }
 
-// EVALUATOR CRON DEADLINE BESERTA PELAPORAN OTOMATIS TIM
 async function checkDeadlines(sock) {
     if (isCheckingDeadlines) return;
     isCheckingDeadlines = true;
@@ -208,7 +234,6 @@ async function checkDeadlines(sock) {
     }
 }
 
-// PENYELARAS TUGAS CRON REMINDER RUTIN BESERTA JITTER SECONDS
 function setupSchedules(sock) {
     scheduledTasks.forEach(task => task.stop());
     scheduledTasks = [];
@@ -230,10 +255,8 @@ function setupSchedules(sock) {
     });
 
     scheduledTasks.push(cron.schedule('* * * * *', () => checkDeadlines(sock), { timezone: 'Asia/Jakarta' }));
-    console.log(`scheduler aktif: ${config.reminders.length} terdaftar.`);
 }
 
-// GERBANG UNDUHAN OTOMATIS UNTUK MEDIA REMINDER
 async function processMediaReminderDownload(sock, msg, fromJid, captionText, config) {
     try {
         const messageType = Object.keys(msg.message)[0];
@@ -272,7 +295,6 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
     }
 }
 
-// INITIALISASI CORE ENGINE BAILEYS
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false });
@@ -298,10 +320,10 @@ async function startBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
-        const fromJid = msg.key.remoteJid;
+        const fromJid = msg.remoteJid || msg.key.remoteJid;
         const isGroup = fromJid.endsWith('@g.us');
-        const senderName = msg.pushName || 'orang';
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+        const senderName = msg.pushName || 'Orang';
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
         let config = loadConfig();
 
@@ -309,45 +331,65 @@ async function startBot() {
             logGroupMessage(senderName, text);
         }
 
-        // PENCEGAT MEDIA DOWNLOAD UNTUK CAPTION JADWAL
-        const messageType = Object.keys(msg.message)[0];
-        if ((messageType === 'imageMessage' || messageType === 'videoMessage') && text.includes(':')) {
-            await processMediaReminderDownload(sock, msg, fromJid, text, config);
-            return;
-        }
-
-        // 1. GERBANG MANUAL UTAMA (PENCEGAT SLASH & MENU HELP)
+        // 1. GERBANG MANUAL UTAMA (SLASH INTERCEPTOR)
         if (text.startsWith('/')) {
             resetState(fromJid);
-            if (text.trim().toLowerCase() === '/help') {
+            const cmd = text.trim().toLowerCase();
+            if (cmd === '/help') {
                 const menuHelp = `🛠 *MENU UTAMA BANTUAN REMINDER BOT*\n` +
                     `--------------------------------------------------------\n\n` +
                     `📌 *PERINTAH MANUAL (SLASH COMMAND)*\n` +
-                    `• */list* : Menampilkan semua daftar agenda aktif di database.\n` +
-                    `• */daftar* : Registrasi akun lu biar dapet izin akses penuh.\n` +
-                    `• */tambah* : Membuat pengingat rutin secara manual.\n` +
+                    `• */list* : Menampilkan agenda aktif secara ringkas.\n` +
+                    `• */listdetail* : Membedah data parameter jadwal secara mentah.\n` +
+                    `• */daftar* : Registrasi izin akses kontrol peladen.\n` +
+                    `• */tambah* : Membuat alarm harian/rutin manual.\n` +
                     `• */tambahdeadline* : Membuat target deadline manual.\n` +
                     `• */editpesan [id] [teks]* : Mengubah template durasi (bisa pakai *AI:* atau *{judul}*).\n` +
-                    `• */editpesannow [id] [teks]* : Mengubah template eksekusi.\n\n` +
+                    `• */editpesannow [id] [teks]* : Mengubah template eksekusi tepat waktu.\n\n` +
                     `🤖 *FITUR KASUAL CERDAS (AI MODE)*\n` +
                     `Tag bot di grup atau japri langsung pakai bahasa sehari-hari:\n` +
                     `• *Bikin Jadwal* : "buatin gue jadwal mancing jam 18:15 ntar malem"\n` +
-                    `• *Cek Agenda* : "coba liat dong gimana aja listnya"\n` +
+                    `• *Cek Agenda* : "coba liat dong jadwal versi detailnya"\n` +
                     `• *Rangkum Chat* : "200 bubble ke atas kita ngomongin apa rangkumin"\n\n` +
                     `💬 *ATURAN SESI CHAT & MIMICKING*\n` +
-                    `• Sesi obrolan otomatis mati jika didiamkan selama 10 menit.\n` +
                     `• Putus sesi obrolan kapan saja dengan mengetik kata penutup (*sip*, *oke*, *udahan*, dll).`;
 
                 await sock.sendMessage(fromJid, { text: menuHelp }, { quoted: msg });
+                return;
+            }
+            if (cmd === '/listdetail') {
+                await handleListDetail(sock, fromJid);
                 return;
             }
             await handleCommand(sock, text, fromJid, () => setupSchedules(sock));
             return;
         }
 
+        // 2. INTERCEPTOR BERKAS MEDIA MILIK PEMILIK
+        if (!isGroup && fromJid === config.ownerJid && (msg.message.imageMessage || msg.message.videoMessage)) {
+            await processMediaReminderDownload(sock, msg, fromJid, text, config);
+            return;
+        }
+
+        // 3. PELACAKAN JURNAL RESPON AKTIVITAS TIM KELOMPOK
+        if (!isGroup) {
+            let tracked = false;
+            config.reminders.forEach(r => {
+                if (r.teamTracking && r.teamTracking[fromJid] && r.teamTracking[fromJid].status !== 'Aktif') {
+                    r.teamTracking[fromJid] = { status: 'Aktif', message: text };
+                    tracked = true;
+                }
+            });
+            if (tracked) {
+                saveConfig(config);
+                await sock.sendMessage(fromJid, { text: 'siap' });
+                return;
+            }
+        }
+
         const lowText = text.trim().toLowerCase();
 
-        // 2. KONDISI LOCK MUTLAK: JIKA SEDANG MENUNGGU IJIN KONFIRMASI JADWAL
+        // 4. KONDISI LOCK STATUS: KONFIRMASI JADWAL DUA LANGKAH (REGULAR EXPRESSION MATCH)
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
             const state = userStates[fromJid];
             
@@ -357,7 +399,10 @@ async function startBot() {
                 return;
             }
 
-            if (lowText === 'iya' || lowText === 'y') {
+            const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('buat agenda');
+            const isChat = /\b(chatan|ngobrol|chat|basa basi)\b/i.test(lowText) || lowText.includes('chatan');
+
+            if (isYes) {
                 const data = state.data;
                 let targetTimestamp = Date.now();
                 
@@ -395,7 +440,7 @@ async function startBot() {
                 resetState(fromJid);
                 setupSchedules(sock);
                 await sock.sendMessage(fromJid, { text: 'jadwal udah gue simpen permanen ya coy.' });
-            } else if (lowText === 'chatan') {
+            } else if (isChat) {
                 setState(fromJid, 'chat');
                 await sock.sendMessage(fromJid, { text: 'oke gas, mau ngobrolin apaan nih?' });
             } else {
@@ -404,7 +449,7 @@ async function startBot() {
             return;
         }
 
-        // 3. JALUR UMUM DETEKSI RADAR INTENT (BERLAKU SETIAP CHAT MASUK)
+        // 5. PENYARING ANTREN RADAR NIAT (INTENT PARSER EVALUATOR)
         const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
         const isBotMentioned = mentionedJids.some(j => j.split(':')[0] === botJidNumber);
 
@@ -430,12 +475,16 @@ async function startBot() {
                     await sock.sendMessage(fromJid, { text: summary });
                 }
                 
+            } else if (intentData.intent === 'read_schedule_detail') {
+                resetState(fromJid);
+                await handleListDetail(sock, fromJid);
+
             } else if (intentData.intent === 'read_schedule') {
                 resetState(fromJid);
                 await handleCommand(sock, '/list', fromJid, () => setupSchedules(sock));
                 
             } else {
-                // JALUR EVALUASI BASA-BASI (CHAT MODE)
+                // EVALUASI STRUKTUR SAKELAR BASA-BASI
                 if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke'].some(w => lowText === w || lowText.includes(w))) {
                     if (userStates[fromJid] && userStates[fromJid].mode === 'chat') {
                         resetState(fromJid);

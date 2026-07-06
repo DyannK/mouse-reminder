@@ -131,31 +131,30 @@ async function generateTagReply(triggerText, styleInstruction = null) {
 async function parseIntentFromText(triggerText) {
     const lowText = triggerText.toLowerCase();
 
-    // 1. PRAFILTER BACA JADWAL (100 Persen Akurat Tanpa AI)
+    // SENSOR AKSES RADAR DETAIL JADWAL KASUAL
     const readKeywords = ['lihat', 'liat', 'cek', 'tampilkan', 'tampilin', 'list', 'info', 'ada apa aja', 'gimana aja'];
-    const scheduleKeywords = ['jadwal', 'agenda', 'deadline', 'ingetan', 'listnya'];
+    const scheduleKeywords = ['jadwal', 'agenda', 'deadline', 'ingetan', 'listnya', 'list'];
     
     const hasReadKw = readKeywords.some(kw => lowText.includes(kw));
     const hasSchedKw = scheduleKeywords.some(kw => lowText.includes(kw));
 
-    if ((hasReadKw && hasSchedKw) || lowText === 'coba liat jadwal' || lowText.includes('gimana aja listnya')) {
+    if ((hasReadKw && hasSchedKw) || lowText.includes('liat jadwal') || lowText.includes('gimana aja listnya') || lowText.includes('liat list')) {
+        if (lowText.includes('detail')) {
+            return { intent: 'read_schedule_detail', judul: null, waktu: null, jumlahChat: 200 };
+        }
         return { intent: 'read_schedule', judul: null, waktu: null, jumlahChat: 200 };
     }
 
-    // 2. PRAFILTER RANGKUMAN (100 Persen Akurat Tanpa AI)
     if (lowText.includes('rangkum') || lowText.includes('rangkumin') || lowText.includes('summary')) {
         const match = lowText.match(/\d+/);
         const jumlahChat = match ? parseInt(match[0], 10) : 200;
         return { intent: 'summarize', judul: null, waktu: null, jumlahChat };
     }
 
-    // 3. JALUR UTAMA PEMBACA NIAT BERSAMA PEMAKSAAN PROMPT
     let system = `lu adalah mesin pembaca niat khusus bahasa indonesia. analisa kalimat dan kembalikan JSON murni.
 pilihan intent:
 1. "create_schedule": jika pengguna ingin membuat jadwal/reminder/deadline DAN menyebutkan jam serta judul agenda secara eksplisit.
 2. "chat": jika hanya mengobrol biasa atau menyapa.
-
-aturan ketat: jika judul atau jam tidak ada atau kurang jelas, wajib gunakan intent "chat". format waktu wajib "HH:MM".
 
 format output json murni:
 {
@@ -179,7 +178,6 @@ format output json murni:
         return JSON.parse(result.text.replace(/```json|```/gi, '').trim());
     } catch (err) {
         console.error('gagal urai json intent:', err.message);
-        console.error('teks mentah pemicu eror:', result.text);
         return { intent: 'chat' };
     }
 }
