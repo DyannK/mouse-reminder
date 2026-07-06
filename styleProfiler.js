@@ -1,4 +1,4 @@
-const { loadConfig, saveConfigDebounced } = require('./configManager');
+const { loadConfig, saveConfig } = require('./configManager');
 
 const MAX_SAMPLES = 30;
 const EMOJI_REGEX = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
