@@ -1,5 +1,4 @@
 const fs = require('fs');
-const path = require('./group_log.json');
 
 const MAX_LOGS = 500;
 
