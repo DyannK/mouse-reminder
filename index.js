@@ -42,6 +42,27 @@ function setState(jid, mode, data = {}) {
     };
 }
 
+// FORMATTER POTONGAN NAMA PANGGILAN DINAMIS KHUSUS TONGKRONGAN
+function getNick(jid, pushName, config) {
+    const nameMap = {
+        'dyan': 'Yan',
+        'medista': 'Med',
+        'fizar': 'Zar',
+        'prayoga': 'Yog',
+        'helmi': 'Hel',
+        'azanta': 'Zan'
+    };
+    let mappedName = config.accountMapping[jid];
+    if (!mappedName && jid === config.ownerJid) mappedName = 'Dyan';
+    if (!mappedName) mappedName = pushName || 'Coy';
+    
+    const lowName = mappedName.toLowerCase();
+    for (const [key, val] of Object.entries(nameMap)) {
+        if (lowName.includes(key)) return val;
+    }
+    return mappedName.slice(0, 3);
+}
+
 function getJakartaDateComponents(baseDate = new Date()) {
     const formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: 'Asia/Jakarta',
@@ -119,7 +140,7 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
     const intervalVal = data.intervalMinutes || 1;
     const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
 
-    let confirmationText = `📋 *[PRALATAN KONFIRMASI AGENDA]*\n` +
+    let confirmationText = `📋 *[KONFIRMASI AGENDA]*\n` +
         `• *Judul Aktivitas*: ${data.judul || 'Agenda Kasual'}\n` +
         `• *Waktu Sasaran*: Jam ${data.waktu || 'Belum diset'} WIB\n` +
         `• *Target Penerima*: ${targetName}\n` +
@@ -309,7 +330,6 @@ async function checkDeadlines(sock) {
                     if (reminder.scope === 'group') await handleGroupTeamDistribution(sock, reminder, milestone, config);
                     if (milestone.isAuto && reminder.scope === 'group') await generateAndSendTeamReport(sock, reminder, config);
 
-                    // LOGIKA BYPASS TARGET ROUTING HASIL AUDIT KELAS BERAT
                     const targetJids = (reminder.targets || ['group']).map(t => {
                         if (t === 'group') return config.groupJid;
                         if (t === 'personal') return config.ownerJid;
@@ -363,7 +383,6 @@ function setupSchedules(sock) {
         if (reminder.type === 'deadline') return;
         const task = cron.schedule(reminder.cronPattern, () => {
             setTimeout(async () => {
-                // LOGIKA BYPASS TARGET ROUTING ALARM RECURRING
                 const targetJids = (reminder.targets || ['group']).map(t => {
                     if (t === 'group') return config.groupJid;
                     if (t === 'personal') return config.ownerJid;
@@ -453,6 +472,7 @@ async function startBot() {
         
         let config = loadConfig();
         const samples = config.styleProfiles?.[fromJid]?.samples || [];
+        const currentNick = getNick(fromJid, msg.pushName, config);
 
         if (isGroup && text) {
             logGroupMessage(senderName, text);
@@ -527,7 +547,7 @@ async function startBot() {
             return;
         }
 
-        // 3. PELACAKAN JURNAL RESPON AKTIVITAS TIM KELOMPOK
+        // 3. JALUR PELACAKAN AKTIVITAS TIM KELOMPOK DENGAN BALASAN PENUTUP AI
         if (!isGroup) {
             let tracked = false;
             config.reminders.forEach(r => {
@@ -538,20 +558,21 @@ async function startBot() {
             });
             if (tracked) {
                 saveConfig(config);
-                await sock.sendMessage(fromJid, { text: 'siap' });
+                const aiReply = await generateMimicReply(text, samples);
+                await sock.sendMessage(fromJid, { text: aiReply }, { quoted: msg });
                 return;
             }
         }
 
         const lowText = text.trim().toLowerCase();
 
-        // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
+        // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN (NICKNAME MATCH)
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
             const state = userStates[fromJid];
             
             if (['gajadi', 'batal', 'cancel', 'ntar aja'].some(w => lowText.includes(w))) {
                 resetState(fromJid);
-                await sock.sendMessage(fromJid, { text: 'oke bray, pembuatan jadwal dibatalin ya.' }, { quoted: msg });
+                await sock.sendMessage(fromJid, { text: `oke bray, pembuatan jadwal dibatalin ya ${currentNick}.` }, { quoted: msg });
                 return;
             }
 
@@ -599,7 +620,8 @@ async function startBot() {
                 return;
             }
 
-            const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('buat agenda');
+            // KAMUS REGEX ISYES DIPERLUAS MENGAKOMODASI IYE / IYEE / YEE
+            const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
             const isChat = /\b(chatan|ngobrol|chat|basa basi)\b/i.test(lowText) || lowText.includes('chatan');
 
             if (isYes) {
@@ -655,12 +677,12 @@ async function startBot() {
                 resetState(fromJid);
                 setupSchedules(sock);
                 
-                await sock.sendMessage(fromJid, { text: 'jadwal udah gue simpen permanen ya coy.' });
+                await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}.` });
             } else if (isChat) {
                 setState(fromJid, 'chat');
                 await sock.sendMessage(fromJid, { text: 'oke gas, mau ngobrolin apaan nih?' });
             } else {
-                await sock.sendMessage(fromJid, { text: 'mau lanjut chatan aja, atau fix buat agenda nih? balas iya atau chatan' });
+                await sock.sendMessage(fromJid, { text: `mau lanjut chatan aja, atau fix buat agenda nih? balas iya atau chatan ${currentNick}` });
             }
             return;
         }
@@ -720,7 +742,7 @@ async function startBot() {
                 if (logs.length === 0) {
                     await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam nih coy.' });
                 } else {
-                    await sock.sendMessage(fromJid, { text: 'bentar, gue baca-baca dulu ya...' });
+                    await sock.sendMessage(fromJid, { text: 'bentar, gue rangkumin dulu ya...' });
                     const summary = await summarizeChatLog(logs);
                     await sock.sendMessage(fromJid, { text: summary });
                 }
@@ -737,7 +759,7 @@ async function startBot() {
                 if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke'].some(w => lowText === w || lowText.includes(w))) {
                     if (userStates[fromJid] && userStates[fromJid].mode === 'chat') {
                         resetState(fromJid);
-                        await sock.sendMessage(fromJid, { text: 'oke siap, obrolan gue tutup ya bray.' }, { quoted: msg });
+                        await sock.sendMessage(fromJid, { text: `oke siap, obrolan gue tutup ya bray ${currentNick}.` }, { quoted: msg });
                         return;
                     }
                 }
