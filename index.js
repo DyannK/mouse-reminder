@@ -49,7 +49,6 @@ function setState(jid, mode, data = {}) {
     };
 }
 
-// LOGIKA BARU: MESIN PEMOTONG SUKU KATA OTOMATIS (NON-KAKU FALLBACK)
 function getNick(jid, pushName, config) {
     const nameMap = {
         'dyan': 'yan',
@@ -66,30 +65,23 @@ function getNick(jid, pushName, config) {
     if (!mappedName && jid === config.ownerJid) mappedName = 'dyan';
     if (!mappedName) mappedName = pushName || 'coy';
     
-    // Isolasi kata pertama dan paksa huruf kecil semua
     let firstName = mappedName.trim().split(/\s+/)[0].toLowerCase();
     
-    // Cek kecocokan kamus inti
     if (nameMap[firstName]) return nameMap[firstName];
     for (const [key, val] of Object.entries(nameMap)) {
         if (firstName.includes(key)) return val;
     }
     
-    // EVALUATOR KASUAL SUKU KATA (LINGUISTIC FALLBACK ENGINE)
     if (firstName.length <= 4) return firstName;
     
     const isVowel = (ch) => ['a','e','i','o','u'].includes(ch);
     
-    // Deteksi pola double konsonan di tengah (contoh: helmi -> l & m mati)
     if (!isVowel(firstName[2]) && !isVowel(firstName[3])) {
         return firstName.slice(0, 3);
     }
-    
-    // Deteksi pola vokal suku kata terbuka/tertutup (contoh: nadirah -> nad)
     if (!isVowel(firstName[2])) {
         return firstName.slice(0, 3);
     }
-    
     return firstName.slice(0, 2);
 }
 
@@ -186,6 +178,7 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
         `- _"ganti interval jadi 5 menit"_\n\n` +
         `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
 
+    // HASIL AUDIT: variabel quotedMsg dikunci rapat menggantikan eror typo msg eksternal kemarin
     await sock.sendMessage(fromJid, { text: confirmationText.toLowerCase() }, { quoted: quotedMsg });
 }
 
@@ -281,7 +274,8 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
         
         for (const member of members) {
             const memberJid = member.id;
-            if (memberJid.split(':')[0] === botJidNumber || memberJid === config.ownerJid) continue;
+            // HASIL AUDIT: diganti menggunakan .includes() agar tidak mengirim DM pelacakan ke diri sendiri
+            if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) continue;
 
             const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
             const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
@@ -312,7 +306,8 @@ async function generateAndSendTeamReport(sock, reminder, config) {
 
     for (const member of members) {
         const jid = member.id;
-        if (jid.split(':')[0] === botJidNumber) continue;
+        // HASIL AUDIT: diganti menggunakan .includes() agar id bot terfilter secara akurat di laporan grup
+        if (jid.includes(botJidNumber)) continue;
 
         const ownerName = config.accountMapping[jid] || (jid === config.ownerJid ? 'Pemilik' : jid.split('@')[0]);
         if (!mappedReport[ownerName]) mappedReport[ownerName] = { active: false, details: '-' };
@@ -484,7 +479,7 @@ async function startBot() {
         if (connection === 'close') {
             if ((lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
         } else if (connection === 'open') {
-            botJidNumber = sock.user.id.split(':')[0];
+            botJidNumber = sock.user.id.split(':')[0].split('@')[0];
             setupSchedules(sock);
             await initTelegramScraper(sock);
             rl.close();
@@ -497,12 +492,16 @@ async function startBot() {
 
         const fromJid = msg.remoteJid || msg.key.remoteJid;
         const isGroup = fromJid.endsWith('@g.us');
+        const senderJid = isGroup ? (msg.key.participant || fromJid) : fromJid;
         const senderName = msg.pushName || 'orang';
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
+        // HASIL AUDIT: variabel lowText dikunci di posisi paling atas scope upsert untuk mencegah Temporal Dead Zone ReferenceError
+        const lowText = text.trim().toLowerCase();
+        
         let config = loadConfig();
-        const samples = config.styleProfiles?.[fromJid]?.samples || [];
-        const currentNick = getNick(fromJid, msg.pushName, config);
+        const samples = config.styleProfiles?.[senderJid]?.samples || [];
+        const currentNick = getNick(senderJid, msg.pushName, config);
 
         if (isGroup && text) {
             logGroupMessage(senderName, text);
@@ -759,9 +758,9 @@ async function startBot() {
             return;
         }
 
-        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (INTENT PARSER EVALUATOR)
+        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL AUDIT SINKRONISASI MENTION GRUP)
         const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-        const isBotMentioned = mentionedJids.some(j => j.split(':')[0] === botJidNumber);
+        const isBotMentioned = mentionedJids.some(j => j.split('@')[0] === botJidNumber);
 
         if (!isGroup || isBotMentioned) {
             if (!isGroup && !isAuthorized(config, fromJid)) {
