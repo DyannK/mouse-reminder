@@ -162,7 +162,7 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
     const intervalVal = data.intervalMinutes || 1;
     const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
 
-    let confirmationText = `📋 *[KONFIRASI AGENDA]*\n` +
+    let confirmationText = `📋 *[KONFIRMASI AGENDA]*\n` +
         `• *judul aktivitas*: ${data.judul || 'agenda kasual'}\n` +
         `• *waktu sasaran*: jam ${data.waktu || 'belum diset'} wib\n` +
         `• *target penerima*: ${targetName}\n` +
@@ -275,6 +275,7 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
             const memberJid = member.id;
             if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) continue;
 
+            // HASIL FIX AUDIT: Mengembalikan objek konteks penuh agar isi pesan AI kelompok tidak kosong
             const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
             const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
             const manualFallback = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
@@ -487,7 +488,6 @@ async function startBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
-        // AUDIT PEMBONGKAR: Modul normalisasi kemasan enkripsi pesan sementara wa grup
         if (msg.message.ephemeralMessage) {
             msg.message = msg.message.ephemeralMessage.message;
         }
@@ -503,15 +503,14 @@ async function startBot() {
         const isGroup = fromJid.endsWith('@g.us');
         const senderJid = isGroup ? (msg.key.participant || fromJid) : fromJid;
         const senderName = msg.pushName || 'orang';
-        
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
-        // AMAN: lowText dikunci paten paling atas pasca pembongkaran kemasan pesan sementara sukses
         const lowText = text.trim().toLowerCase();
         
         let config = loadConfig();
         const samples = config.styleProfiles?.[senderJid]?.samples || [];
         const currentNick = getNick(senderJid, msg.pushName, config);
+        const botNameClean = (sock.user.name || 'dyan 2').toLowerCase();
 
         if (isGroup && text) {
             logGroupMessage(senderName, text);
@@ -633,7 +632,7 @@ async function startBot() {
             }
             
             if (/ganti pesan durasi|ubah pesan durasi|ganti template durasi/i.test(lowText)) {
-                state.data.pesanDurasi = text.replace(/ganti pesan durasi jadi|ubah pesan durasi jadi|ganti template durasi jadi|ganti pesan durasi|ubah pesan durasi/gi, '').trim();
+                state.data.pesanDurasi = text.replace(/ganti pesan durasi jadi|ubah pesan urban jadi|ganti template durasi jadi|ganti pesan durasi|ubah pesan durasi/gi, '').trim();
                 await sendDetailedConfirmation(sock, fromJid, state.data, msg);
                 return;
             }
@@ -720,17 +719,13 @@ async function startBot() {
                 resetState(fromJid);
                 setupSchedules(sock);
                 
-                const reply = await generateDynamicStateText(`jadwal udah gue simpen permanen ya ${currentNick}`, currentNick, samples, chatMemory[fromJid] || []);
-                pushToMemory(fromJid, 'bot', reply);
-                await sock.sendMessage(fromJid, { text: reply });
+                await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}` });
             } else if (isChat) {
                 setState(fromJid, 'chat');
-                const reply = await generateDynamicStateText(`oke gas mau ngobrolin apaan nih ${currentNick}`, currentNick, samples, chatMemory[fromJid] || []);
-                pushToMemory(fromJid, 'bot', reply);
+                const reply = await generateDynamicStateText('oke gas mau ngobrolin apaan nih', currentNick, samples, chatMemory[fromJid] || []);
                 await sock.sendMessage(fromJid, { text: reply });
             } else {
-                const reply = await generateDynamicStateText(`mau lanjut chatan aja atau fix buat agenda nih? balas iya atau chatan ${currentNick}`, currentNick, samples, chatMemory[fromJid] || []);
-                pushToMemory(fromJid, 'bot', reply);
+                const reply = await generateDynamicStateText('mau lanjut chatan aja atau fix buat agenda nih balas iya atau chatan', currentNick, samples, chatMemory[fromJid] || []);
                 await sock.sendMessage(fromJid, { text: reply });
             }
             return;
@@ -751,26 +746,30 @@ async function startBot() {
                     setState(fromJid, 'confirm_schedule', state.data.originalData);
                     await sendDetailedConfirmation(sock, fromJid, state.data.originalData, msg);
                 } else {
-                    const reply = await generateDynamicStateText(`masih kebanyakan bray (${testMilestones.length} kali) gempor gue gila coba gedein lagi menit atau jamnya`, currentNick, samples, chatMemory[fromJid] || []);
+                    const reply = await generateDynamicStateText(`masih kebanyakan bray ${testMilestones.length} kali gempor gue gila coba gedein lagi menit atau jamnya`, currentNick, samples, chatMemory[fromJid] || []);
                     pushToMemory(fromJid, 'bot', reply);
                     await sock.sendMessage(fromJid, { text: reply });
                 }
             } else if (['gajadi', 'batal', 'cancel'].some(w => lowText.includes(w))) {
                 resetState(fromJid);
-                const reply = await generateDynamicStateText(`oke sip gue reset`, currentNick, samples, chatMemory[fromJid] || []);
+                const reply = await generateDynamicStateText('oke sip gue reset', currentNick, samples, chatMemory[fromJid] || []);
                 pushToMemory(fromJid, 'bot', reply);
                 await sock.sendMessage(fromJid, { text: reply });
             } else {
-                const reply = await generateDynamicStateText(`coba benerin lagi maksud lu gimana mau diganti tiap berapa menit atau berapa jam`, currentNick, samples, chatMemory[fromJid] || []);
+                const reply = await generateDynamicStateText('coba benerin lagi maksud lu gimana mau diganti tiap berapa menit atau berapa jam', currentNick, samples, chatMemory[fromJid] || []);
                 pushToMemory(fromJid, 'bot', reply);
                 await sock.sendMessage(fromJid, { text: reply });
             }
             return;
         }
 
-        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL AUDIT SINKRONISASI MENTION HIBRIDA INTEGRAL)
+        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL DEBUGGING PENANGKAP SENSOR MENTION HIBRID TOTAL)
         const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-        const isBotMentioned = mentionedJids.some(j => j.includes(botJidNumber)) || lowText.includes('@bot') || lowText.includes(botJidNumber);
+        const isBotMentioned = mentionedJids.some(j => j.includes(botJidNumber)) || 
+                               lowText.includes('@bot') || 
+                               lowText.includes(botJidNumber) || 
+                               lowText.includes('@dyan') || 
+                               lowText.includes(botNameClean);
 
         if (!isGroup || isBotMentioned) {
             if (!isGroup && !isAuthorized(config, fromJid)) {
@@ -778,10 +777,14 @@ async function startBot() {
                 return;
             }
 
-            // Pembersihan mandiri string tag @bot beserta nomor asli bot agar tidak merusak interpretasi parameter radar niat AI
             let processingText = text;
             if (isGroup) {
-                processingText = text.replace(new RegExp(`@${botJidNumber}`, 'gi'), '').replace(/@bot/gi, '').trim();
+                processingText = text.replace(new RegExp(`@${botJidNumber}`, 'gi'), '')
+                                     .replace(new RegExp(`@${botNameClean}`, 'gi'), '')
+                                     .replace(/@bot/gi, '')
+                                     .replace(/@dyan\s*2/gi, '')
+                                     .replace(/@dyan/gi, '')
+                                     .trim();
             }
 
             const intentData = await parseIntentFromText(processingText);
@@ -791,7 +794,7 @@ async function startBot() {
                 
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
-                    const reply = await generateDynamicStateText(`ini yakin gue ngingetin ${calculated.length} kali? gempor gue gila bray, peladen bisa meledak. coba benerin lagi maksud lu gimana, mau diganti tiap berapa menit?`, currentNick, samples, chatMemory[fromJid] || []);
+                    const reply = await generateDynamicStateText(`ini yakin gue ngingetin ${calculated.length} kali gempor gue gila bray peladen bisa meledak coba benerin lagi maksud lu gimana mau diganti tiap berapa menit`, currentNick, samples, chatMemory[fromJid] || []);
                     pushToMemory(fromJid, 'bot', reply);
                     await sock.sendMessage(fromJid, { text: reply });
                     return;
