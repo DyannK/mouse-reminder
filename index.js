@@ -764,12 +764,21 @@ async function startBot() {
         }
 
         // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL DEBUGGING PENANGKAP SENSOR MENTION HIBRID TOTAL)
-        const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        const mentionedJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        
+        // Sensor hibrida yang lebih aman tanpa regex dinamis yang rentan crash
         const isBotMentioned = mentionedJids.some(j => j.includes(botJidNumber)) || 
                                lowText.includes('@bot') || 
-                               lowText.includes(botJidNumber) || 
-                               lowText.includes('@dyan') || 
-                               lowText.includes(botNameClean);
+                               lowText.includes('oi') || 
+                               (botJidNumber && lowText.includes(botJidNumber)) || 
+                               (botNameClean && lowText.includes(botNameClean));
+
+        // Tembakan log langsung ke konsol termux buat liat isi perut datanya bray
+        console.log(`\n--- [DEBUG RADAR GRUP] ---`);
+        console.log(`nama pengirim: ${senderName}`);
+        console.log(`teks asli: ${text}`);
+        console.log(`apakah bot merasa dipanggil: ${isBotMentioned}`);
+        console.log(`---------------------------\n`);
 
         if (!isGroup || isBotMentioned) {
             if (!isGroup && !isAuthorized(config, fromJid)) {
@@ -777,11 +786,10 @@ async function startBot() {
                 return;
             }
 
+            // Pembersihan string tag pake metode ganti string aman bray
             let processingText = text;
             if (isGroup) {
-                processingText = text.replace(new RegExp(`@${botJidNumber}`, 'gi'), '')
-                                     .replace(new RegExp(`@${botNameClean}`, 'gi'), '')
-                                     .replace(/@bot/gi, '')
+                processingText = text.replace(/@bot/gi, '')
                                      .replace(/@dyan\s*2/gi, '')
                                      .replace(/@dyan/gi, '')
                                      .trim();
