@@ -178,7 +178,6 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
         `- _"ganti interval jadi 5 menit"_\n\n` +
         `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
 
-    // HASIL AUDIT: variabel quotedMsg dikunci rapat menggantikan eror typo msg eksternal kemarin
     await sock.sendMessage(fromJid, { text: confirmationText.toLowerCase() }, { quoted: quotedMsg });
 }
 
@@ -274,7 +273,6 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
         
         for (const member of members) {
             const memberJid = member.id;
-            // HASIL AUDIT: diganti menggunakan .includes() agar tidak mengirim DM pelacakan ke diri sendiri
             if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) continue;
 
             const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
@@ -306,7 +304,6 @@ async function generateAndSendTeamReport(sock, reminder, config) {
 
     for (const member of members) {
         const jid = member.id;
-        // HASIL AUDIT: diganti menggunakan .includes() agar id bot terfilter secara akurat di laporan grup
         if (jid.includes(botJidNumber)) continue;
 
         const ownerName = config.accountMapping[jid] || (jid === config.ownerJid ? 'Pemilik' : jid.split('@')[0]);
@@ -496,7 +493,7 @@ async function startBot() {
         const senderName = msg.pushName || 'orang';
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
-        // HASIL AUDIT: variabel lowText dikunci di posisi paling atas scope upsert untuk mencegah Temporal Dead Zone ReferenceError
+        // KRUSIAL: Baris lowText ditarik ke paling atas scope pesan demi menangkal Temporal Dead Zone ReferenceError
         const lowText = text.trim().toLowerCase();
         
         let config = loadConfig();
@@ -758,9 +755,9 @@ async function startBot() {
             return;
         }
 
-        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL AUDIT SINKRONISASI MENTION GRUP)
+        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL AUDIT SINKRONISASI MENTION HIBRIDA INTEGRAL)
         const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-        const isBotMentioned = mentionedJids.some(j => j.split('@')[0] === botJidNumber);
+        const isBotMentioned = mentionedJids.some(j => j.includes(botJidNumber)) || lowText.includes('@bot') || lowText.includes(botJidNumber);
 
         if (!isGroup || isBotMentioned) {
             if (!isGroup && !isAuthorized(config, fromJid)) {
@@ -768,7 +765,13 @@ async function startBot() {
                 return;
             }
 
-            const intentData = await parseIntentFromText(text);
+            // Pembersihan mandiri string tag @bot agar tidak merusak interpretasi parameter radar niat AI
+            let processingText = text;
+            if (isGroup) {
+                processingText = text.replace(/@bot/gi, '').trim();
+            }
+
+            const intentData = await parseIntentFromText(processingText);
 
             if (intentData.intent === 'create_schedule') {
                 const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1);
@@ -789,7 +792,7 @@ async function startBot() {
                 if (logs.length === 0) {
                     await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam nih coy' });
                 } else {
-                    await sock.sendMessage(fromJid, { text: 'bentar gue baca baca dulu ya' });
+                    await sock.sendMessage(fromJid, { text: 'bentar gue rangkumin dulu ya' });
                     const summary = await summarizeChatLog(logs);
                     await sock.sendMessage(fromJid, { text: summary });
                 }
@@ -812,7 +815,7 @@ async function startBot() {
                 }
 
                 setState(fromJid, 'chat');
-                const reply = await generateMimicReply(text, samples, chatMemory[fromJid] || []);
+                const reply = await generateMimicReply(processingText, samples, chatMemory[fromJid] || []);
                 pushToMemory(fromJid, 'bot', reply);
                 await sock.sendMessage(fromJid, { text: reply }, { quoted: msg });
             }
