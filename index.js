@@ -24,6 +24,7 @@ const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
 let scheduledTasks = [];
 let botJidNumber = null;
+let botLidNumber = null; // Tambahkan baris ini bray
 let isCheckingDeadlines = false;
 
 function pushToMemory(jid, sender, text) {
@@ -477,7 +478,11 @@ async function startBot() {
         if (connection === 'close') {
             if ((lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
         } else if (connection === 'open') {
+            // Rekam nomor HP asli bot
             botJidNumber = sock.user.id.split(':')[0].split('@')[0];
+            // Rekam nomor LID akun bot (Jika ada)
+            botLidNumber = sock.user.lid ? sock.user.lid.split(':')[0].split('@')[0] : null;
+            
             setupSchedules(sock);
             await initTelegramScraper(sock);
             rl.close();
@@ -763,22 +768,14 @@ async function startBot() {
             return;
         }
 
-        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL DEBUGGING PENANGKAP SENSOR MENTION HIBRID TOTAL)
+        // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL DEBUG VALID LID)
         const mentionedJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
         
-        // Sensor hibrida yang lebih aman tanpa regex dinamis yang rentan crash
-        const isBotMentioned = mentionedJids.some(j => j.includes(botJidNumber)) || 
+        const isBotMentioned = mentionedJids.some(j => j.includes(botJidNumber) || (botLidNumber && j.includes(botLidNumber))) || 
                                lowText.includes('@bot') || 
-                               lowText.includes('oi') || 
                                (botJidNumber && lowText.includes(botJidNumber)) || 
+                               (botLidNumber && lowText.includes(botLidNumber)) ||
                                (botNameClean && lowText.includes(botNameClean));
-
-        // Tembakan log langsung ke konsol termux buat liat isi perut datanya bray
-        console.log(`\n--- [DEBUG RADAR GRUP] ---`);
-        console.log(`nama pengirim: ${senderName}`);
-        console.log(`teks asli: ${text}`);
-        console.log(`apakah bot merasa dipanggil: ${isBotMentioned}`);
-        console.log(`---------------------------\n`);
 
         if (!isGroup || isBotMentioned) {
             if (!isGroup && !isAuthorized(config, fromJid)) {
@@ -786,10 +783,12 @@ async function startBot() {
                 return;
             }
 
-            // Pembersihan string tag pake metode ganti string aman bray
+            // Pembersihan string tag dinamis biar memori AI bersih total yan
             let processingText = text;
             if (isGroup) {
                 processingText = text.replace(/@bot/gi, '')
+                                     .replace(new RegExp(`@${botJidNumber}`, 'gi'), '')
+                                     .replace(new RegExp(`@${botLidNumber}`, 'gi'), '')
                                      .replace(/@dyan\s*2/gi, '')
                                      .replace(/@dyan/gi, '')
                                      .trim();
