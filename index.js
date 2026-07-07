@@ -513,13 +513,34 @@ async function startBot() {
         const lowText = text.trim().toLowerCase();
         
         let config = loadConfig();
+        // SENSOR RADAR RAHASIA OWNER UNTUK DAFTAR KONTAK SILENT READER
+        if (fromJid === config.ownerJid && (lowText.startsWith('nama ') || lowText.startsWith('setnama '))) {
+            const matchContact = lowText.match(/(?:nama|setnama)\s+(\d+)\s+(?:jadi\s+)?(.+)/);
+            if (matchContact) {
+                const targetNum = matchContact[1] + '@s.whatsapp.net';
+                const targetNick = matchContact[2].trim().toLowerCase();
+                config.accountMapping[targetNum] = targetNick;
+                
+                if (!config.contacts) config.contacts = [];
+                if (!config.contacts.some(c => c.jid === targetNum)) {
+                    config.contacts.push({ jid: targetNum, name: targetNick });
+                }
+                
+                saveConfig(config);
+                const replySilent = await generateDynamicStateText(`beres yan nomor itu udah gue simpen pake nama ${targetNick}`, currentNick, samples, chatMemory[fromJid] || []);
+                pushToMemory(fromJid, 'bot', replySilent);
+                await sock.sendMessage(fromJid, { text: replySilent }, { quoted: msg });
+                return;
+            }
+        }
+
         const samples = config.styleProfiles?.[senderJid]?.samples || [];
         const currentNick = getNick(senderJid, msg.pushName, config);
         const botNameClean = (sock.user.name || 'dyan 2').toLowerCase();
 
         if (isGroup && text) {
             logGroupMessage(senderName, text);
-        }
+        }   
 
         if (text) {
             pushToMemory(fromJid, currentNick, text);
@@ -829,6 +850,20 @@ async function startBot() {
                 await handleCommand(sock, '/list', fromJid, () => setupSchedules(sock));
                 
             } else {
+                // SENSOR PENYUNTING NAMA PANGGILAN KASUAL OVERRIDE
+                if (lowText.startsWith('panggil gue ') || lowText.startsWith('panggil gua ')) {
+                    const namaBaru = text.replace(/panggil gue|panggil gua/gi, '').trim();
+                    if (namaBaru.length > 0) {
+                        config.accountMapping[senderJid] = namaBaru;
+                        saveConfig(config);
+                        
+                        const replyNama = await generateDynamicStateText(`siap sekarang nama lu udah gue ganti jadi ${namaBaru} yan`, currentNick, samples, chatMemory[fromJid] || []);
+                        pushToMemory(fromJid, 'bot', replyNama);
+                        await sock.sendMessage(fromJid, { text: replyNama }, { quoted: msg });
+                        return;
+                    }
+                }
+
                 if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke'].some(w => lowText === w || lowText.includes(w))) {
                     if (userStates[fromJid] && userStates[fromJid].mode === 'chat') {
                         resetState(fromJid);
