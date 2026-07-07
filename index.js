@@ -890,7 +890,7 @@ async function startBot() {
         }
 
         const samples = config.styleProfiles?.[senderJid]?.samples || [];
-        const currentNick = getNick(senderJid, msg.pushName, config, 'stable');
+        // const currentNick = getNick(senderJid, msg.pushName, config, 'stable');
         const botNameClean = (sock.user.name || 'dyan 2').toLowerCase();
 
         // if (isGroup && text) {
