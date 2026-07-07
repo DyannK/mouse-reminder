@@ -61,7 +61,7 @@ function getNick(jid, pushName, config) {
         'samuel': 'sam'
     };
     
-    let mappedName = config.accountMapping[jid];
+    let mappedName = config.accountMapping?.[jid];
     if (!mappedName && jid === config.ownerJid) mappedName = 'dyan';
     if (!mappedName) mappedName = pushName || 'coy';
     
@@ -152,7 +152,7 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
     } else if (isGroup) {
         try {
             const metadata = await sock.groupMetadata(fromJid);
-            const memberNames = metadata.participants.map(p => config.accountMapping[p.id] || p.id.split('@')[0]);
+            const memberNames = metadata.participants.map(p => config.accountMapping?.[p.id] || p.id.split('@')[0]);
             targetName = `kelompok di grup ini (anggota: ${memberNames.slice(0, 6).join(', ').toLowerCase()}${memberNames.length > 6 ? '... dan lainnya' : ''})`;
         } catch {
             targetName = `kelompok kelompok`;
@@ -162,7 +162,7 @@ async function sendDetailedConfirmation(sock, fromJid, data, quotedMsg) {
     const intervalVal = data.intervalMinutes || 1;
     const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
 
-    let confirmationText = `📋 *[KONFIRMASI AGENDA]*\n` +
+    let confirmationText = `📋 *[KONFIRASI AGENDA]*\n` +
         `• *judul aktivitas*: ${data.judul || 'agenda kasual'}\n` +
         `• *waktu sasaran*: jam ${data.waktu || 'belum diset'} wib\n` +
         `• *target penerima*: ${targetName}\n` +
@@ -306,7 +306,7 @@ async function generateAndSendTeamReport(sock, reminder, config) {
         const jid = member.id;
         if (jid.includes(botJidNumber)) continue;
 
-        const ownerName = config.accountMapping[jid] || (jid === config.ownerJid ? 'Pemilik' : jid.split('@')[0]);
+        const ownerName = config.accountMapping?.[jid] || (jid === config.ownerJid ? 'Pemilik' : jid.split('@')[0]);
         if (!mappedReport[ownerName]) mappedReport[ownerName] = { active: false, details: '-' };
 
         const track = reminder.teamTracking?.[jid];
@@ -487,13 +487,26 @@ async function startBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
+        // AUDIT PEMBONGKAR: Modul normalisasi kemasan enkripsi pesan sementara wa grup
+        if (msg.message.ephemeralMessage) {
+            msg.message = msg.message.ephemeralMessage.message;
+        }
+        if (msg.message.viewOnceMessage) {
+            msg.message = msg.message.viewOnceMessage.message;
+        }
+        if (msg.message.viewOnceMessageV2) {
+            msg.message = msg.message.viewOnceMessageV2.message;
+        }
+        if (!msg.message) return;
+
         const fromJid = msg.remoteJid || msg.key.remoteJid;
         const isGroup = fromJid.endsWith('@g.us');
         const senderJid = isGroup ? (msg.key.participant || fromJid) : fromJid;
         const senderName = msg.pushName || 'orang';
+        
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
-        // KRUSIAL: Baris lowText ditarik ke paling atas scope pesan demi menangkal Temporal Dead Zone ReferenceError
+        // AMAN: lowText dikunci paten paling atas pasca pembongkaran kemasan pesan sementara sukses
         const lowText = text.trim().toLowerCase();
         
         let config = loadConfig();
@@ -765,10 +778,10 @@ async function startBot() {
                 return;
             }
 
-            // Pembersihan mandiri string tag @bot agar tidak merusak interpretasi parameter radar niat AI
+            // Pembersihan mandiri string tag @bot beserta nomor asli bot agar tidak merusak interpretasi parameter radar niat AI
             let processingText = text;
             if (isGroup) {
-                processingText = text.replace(/@bot/gi, '').trim();
+                processingText = text.replace(new RegExp(`@${botJidNumber}`, 'gi'), '').replace(/@bot/gi, '').trim();
             }
 
             const intentData = await parseIntentFromText(processingText);
