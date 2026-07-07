@@ -735,7 +735,7 @@ async function startBot() {
         const isHapusLaporan = cmd.startsWith('/hapuslaporan ') || lowText.startsWith('hapus laporan ') || lowText.startsWith('delete laporan ');
 
         const currentNick = getNick(senderJid, msg.pushName, config, 'stable');
-        const isBotMentioned = text && (text.includes(botJidNumber) || lowText.includes('bot') || msg.mentionedJid?.includes(botJidNumber));
+        let isBotMentioned = text && (text.includes(botJidNumber) || lowText.includes('bot') || msg.mentionedJid?.includes(botJidNumber));
 
         // =================================================================
         // MESIN PENGENDUS HIBRIDA GRUP (LOGGING DATABASE & REKAM RAM PASIF)
@@ -1208,11 +1208,11 @@ async function startBot() {
         // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL DEBUG VALID LID)
         const mentionedJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
         
-        const isBotMentioned = mentionedJids.some(j => j.includes(botJidNumber) || (botLidNumber && j.includes(botLidNumber))) || 
-                               lowText.includes('@bot') || 
-                               (botJidNumber && lowText.includes(botJidNumber)) || 
-                               (botLidNumber && lowText.includes(botLidNumber)) ||
-                               (botNameClean && lowText.includes(botNameClean));
+        isBotMentioned = isBotMentioned || mentionedJids.some(j => j.includes(botJidNumber) || (botLidNumber && j.includes(botLidNumber))) || 
+                         lowText.includes('@bot') || 
+                         (botJidNumber && lowText.includes(botJidNumber)) || 
+                         (botLidNumber && lowText.includes(botLidNumber)) ||
+                         (botNameClean && lowText.includes(botNameClean));
 
         if (!isGroup || isBotMentioned) {
             if (!isGroup && !isAuthorized(config, fromJid)) {
