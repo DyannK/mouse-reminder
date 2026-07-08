@@ -296,7 +296,15 @@ async function handleListDetail(sock, fromJid) {
         if (r.milestones && r.milestones.length > 0) {
             msg += `• milestones:\n`;
             r.milestones.forEach(m => {
-                msg += `  - [${m.label}] (durasi: ${m.totalMinutes || 0} mnt)\n`;
+                // KATUP DINAMIS: Hitung ulang jam dinding secara realtime pas list diprint bray
+                let labelTeksFinal = m.label;
+                if (r.targetTimestamp && m.totalMinutes !== undefined) {
+                    const waktuAlarmMs = r.targetTimestamp - (m.totalMinutes * 60 * 1000);
+                    const komponenJam = getJakartaDateComponents(new Date(waktuAlarmMs));
+                    const teksJamMenit = `${String(komponenJam.hour).padStart(2, '0')}:${String(komponenJam.minute).padStart(2, '0')} WIB`;
+                    labelTeksFinal = m.totalMinutes === 0 ? `[${teksJamMenit}] sekarang` : `[${teksJamMenit}] ${m.totalMinutes} menit lagi`;
+                }
+                msg += `  - ${labelTeksFinal} (durasi: ${m.totalMinutes || 0} mnt)\n`;
             });
         }
         if (r.mediaPath) msg += `• berkas media: ${path.basename(r.mediaPath)}\n`;
