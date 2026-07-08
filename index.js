@@ -671,6 +671,36 @@ function setupSchedules(sock) {
     });
 
     scheduledTasks.push(cron.schedule('* * * * *', () => checkDeadlines(sock), { timezone: 'Asia/Jakarta' }));
+
+    // ====================================================================
+    // KATUP AUTO-DELETE: PEMBERSIH UTAMAA FILE MEDIA TG SETELAH 1 HARI YAN
+    // ====================================================================
+    scheduledTasks.push(cron.schedule('0 * * * *', () => {
+        // Alamat folder scraper bray
+        const targetDir = path.join(__dirname, '..', 'home-reminder'); 
+        const directory = fs.existsSync(targetDir) ? targetDir : __dirname;
+        
+        fs.readdir(directory, (err, files) => {
+            if (err) return;
+            const now = Date.now();
+            const oneDayInMs = 24 * 60 * 60 * 1000; // Filter ketat durasi 24 jam penuh yan bray
+            
+            files.forEach(file => {
+                if (file.startsWith('tgmedia_')) {
+                    const filePath = path.join(directory, file);
+                    fs.stat(filePath, (err, stats) => {
+                        if (err) return;
+                        if (now - stats.mtimeMs > oneDayInMs) {
+                            fs.unlink(filePath, (err) => {
+                                if (!err) console.log(`[auto-delete] berhasil hapus file media kedalwarsa: ${file}`);
+                            });
+                        }
+                    });
+                }
+            });
+        });
+    }, { timezone: 'Asia/Jakarta' }));
+
 }
 
 async function processMediaReminderDownload(sock, msg, fromJid, captionText, config) {
@@ -969,6 +999,9 @@ async function startBot() {
             // ====================================================================
             // PERINTAH UTAMA: FORWARD PESAN PILIHAN BERDASARKAN ID NYA YAN
             // ====================================================================
+            // ====================================================================
+            // PERINTAH UTAMA: FORWARD PESAN PILIHAN BERDASARKAN ID NYA YAN
+            // ====================================================================
             if (cmd.startsWith('/tgforward')) {
                 const args = text.slice(10).trim().split(/\s+/);
                 if (args.length < 2) {
@@ -993,10 +1026,24 @@ async function startBot() {
                     let whatsappPayload = `*[DITERUSKAN DARI TELEGRAM]*\n`;
                     whatsappPayload += `Sumber: ${targetMsg.chatTitle}\n`;
                     whatsappPayload += `Pengirim: ${targetMsg.senderName}\n\n`;
-                    whatsappPayload += targetMsg.text;
+                    whatsappPayload += targetMsg.text || '_[kiriman media gambar/video]_';
 
-                    await sock.sendMessage(config.groupJid, { text: whatsappPayload });
-                    await sock.sendMessage(fromJid, { text: `beres bray, pesan id ${messageId} sukses diteruskan ke grup wa kuliah lu!` }, { quoted: msg });
+                    // JEDA SIMULASI MANUSIA SEBELUM FORWARD RESMI TERBIT BRAY
+                    await sock.sendPresenceUpdate('composing', config.groupJid);
+                    await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
+
+                    if (targetMsg.mediaPath && fs.existsSync(targetMsg.mediaPath)) {
+                        const mediaBuffer = fs.readFileSync(targetMsg.mediaPath);
+                        if (targetMsg.mediaType === 'image') {
+                            await sock.sendMessage(config.groupJid, { image: mediaBuffer, caption: whatsappPayload });
+                        } else if (targetMsg.mediaType === 'video') {
+                            await sock.sendMessage(config.groupJid, { video: mediaBuffer, caption: whatsappPayload });
+                        }
+                        await sock.sendMessage(fromJid, { text: `beres bray, pesan media HD id ${messageId} sukses diteruskan ke grup wa kuliah lu!` }, { quoted: msg });
+                    } else {
+                        await sock.sendMessage(config.groupJid, { text: whatsappPayload });
+                        await sock.sendMessage(fromJid, { text: `beres bray, pesan teks id ${messageId} sukses diteruskan ke grup wa kuliah lu!` }, { quoted: msg });
+                    }
                 } catch (err) {
                     await sock.sendMessage(fromJid, { text: `gagal nerusin pesan bray: ${err.message}` }, { quoted: msg });
                 }

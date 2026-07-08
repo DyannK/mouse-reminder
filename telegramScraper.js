@@ -2,6 +2,8 @@ const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
 const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
 const { loadConfig, saveConfig } = require('./configManager');
 
 let client = null;
@@ -11,6 +13,42 @@ const rl = readline.createInterface({
     output: process.stdout
 });
 const askTerminal = (text) => new Promise((resolve) => rl.question(text, resolve));
+
+// ====================================================================
+// FUNGSI INTERNAL: DOWNLOAD MEDIA VERSI HD ASLI TANPA BURIK BRAY
+// ====================================================================
+async function downloadTelegramMedia(message) {
+    if (!message || !message.media) return null;
+    try {
+        // downloadMedia tanpa parameter thumb akan otomatis menarik resolusi tertinggi bray
+        const buffer = await client.downloadMedia(message.media, {});
+        if (!buffer) return null;
+        
+        let ext = 'jpg';
+        let mediaType = 'image';
+        
+        if (message.media.document) {
+            const mime = message.media.document.mimeType || '';
+            if (mime.includes('video')) {
+                ext = 'mp4';
+                mediaType = 'video';
+            } else if (mime.includes('image')) {
+                ext = 'jpg';
+                mediaType = 'image';
+            }
+        }
+        
+        // Penamaan file wajib pake awalan tgmedia_ buat target auto-delete ntar yan
+        const fileName = `tgmedia_${Date.now()}_${message.id}.${ext}`;
+        const localPath = path.join(__dirname, fileName);
+        fs.writeFileSync(localPath, buffer);
+        
+        return { localPath, mediaType };
+    } catch (err) {
+        console.error('gagal sedot media HD telegram bray:', err.message);
+        return null;
+    }
+}
 
 async function initTelegramScraper(sock) {
     const config = loadConfig();
@@ -55,9 +93,10 @@ async function initTelegramScraper(sock) {
         console.log('Pemuatan awal daftar obrolan dilewati, sistem akan mengandalkan deteksi dinamis.');
     }
 
+    // LISTENER PASIF LIVE CHAT TELEGRAM
     client.addEventHandler(async (event) => {
         const message = event.message;
-        if (!message || !message.message) return;
+        if (!message) return;
 
         try {
             let chatTitle = 'Grup Telegram';
@@ -98,15 +137,30 @@ async function initTelegramScraper(sock) {
                 }
             }
 
-            const cleanText = message.message.trim();
+            const cleanText = (message.message || '').trim();
             
             let whatsappPayload = `*[DITERUSKAN DARI TELEGRAM]*\n`;
             whatsappPayload += `Sumber: ${chatTitle}\n`;
             whatsappPayload += `Pengirim: ${senderName}\n\n`;
-            whatsappPayload += cleanText;
+            whatsappPayload += cleanText || '_[kiriman media gambar/video]_';
 
-            await sock.sendMessage(config.groupJid, { text: whatsappPayload });
-            console.log(`[Telegram Scraper] Berhasil meneruskan pesan dari ${senderName} di grup ${chatTitle}`);
+            // EKSEKUSI CEK DOWNLAND MEDIA PASIF YAN
+            const mediaData = await downloadTelegramMedia(message);
+
+            if (mediaData && fs.existsSync(mediaData.localPath)) {
+                const mediaBuffer = fs.readFileSync(mediaData.localPath);
+                if (mediaData.mediaType === 'image') {
+                    await sock.sendMessage(config.groupJid, { image: mediaBuffer, caption: whatsappPayload });
+                } else if (mediaData.mediaType === 'video') {
+                    await sock.sendMessage(config.groupJid, { video: mediaBuffer, caption: whatsappPayload });
+                }
+                console.log(`[Telegram Scraper] Berhasil meneruskan media HD dari ${senderName} di grup ${chatTitle}`);
+            } else {
+                if (cleanText) {
+                    await sock.sendMessage(config.groupJid, { text: whatsappPayload });
+                    console.log(`[Telegram Scraper] Berhasil meneruskan pesan teks dari ${senderName} di grup ${chatTitle}`);
+                }
+            }
 
         } catch (err) {
             console.error('Gagal memproses kiriman pesan dari Telegram:', err.message);
@@ -114,9 +168,6 @@ async function initTelegramScraper(sock) {
     }, new NewMessage({}));
 }
 
-// ====================================================================
-// FUNGSI BARU: MENDUKUNG FITUR INTIP OBROLAN TERAKHIR TELEGRAM YAN BRAY
-// ====================================================================
 async function getRecentMessages(groupNameOrId, limit = 10) {
     if (!client) throw new Error('client telegram belum aktif bray.');
     
@@ -143,16 +194,16 @@ async function getRecentMessages(groupNameOrId, limit = 10) {
     const messages = await client.getMessages(targetEntity, { limit });
     return {
         title: foundTitle,
-        list: messages.map(m => ({
-            id: m.id,
-            text: (m.message || '').trim() || '[media / tanpa teks]'
-        }))
+        list: messages.map(m => {
+            let labelTeks = (m.message || '').trim();
+            if (!labelTeks && m.media) {
+                labelTeks = m.media.document ? '[🎞️ media video/berkas]' : '[🖼️ media gambar/foto]';
+            }
+            return { id: m.id, text: labelTeks || '[tidak ada teks]' };
+        })
     };
 }
 
-// ====================================================================
-// FUNGSI BARU: MENARIK SATU DATA PESAN PILIHAN BERDASARKAN NOMOR ID
-// ====================================================================
 async function fetchSingleMessage(groupNameOrId, messageId) {
     if (!client) throw new Error('client telegram belum aktif bray.');
 
@@ -192,10 +243,15 @@ async function fetchSingleMessage(groupNameOrId, messageId) {
         }
     }
 
+    // SEDOT DOWNLOAD FILE HD NYA DI SINI YAN PAS DI PANGGIL MANUAL
+    const mediaData = await downloadTelegramMedia(msg);
+
     return {
         chatTitle: foundTitle,
         senderName,
-        text: (msg.message || '').trim() || '[media / tanpa teks]'
+        text: (msg.message || '').trim(),
+        mediaPath: mediaData ? mediaData.localPath : null,
+        mediaType: mediaData ? mediaData.mediaType : null
     };
 }
 
