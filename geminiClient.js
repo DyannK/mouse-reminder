@@ -223,10 +223,9 @@ async function generateDynamicStateText(fallbackText, currentNick, samples, hist
     return result.text ? result.text.toLowerCase() : fallbackText.toLowerCase();
 }
 
-async function summarizeChatLog(logs) {
-    const chatText = logs.map(l => `${l.senderName}: ${l.text}`).join('\n');
-    const system = `lu adalah perangkum tongkrongan. baca log chat berikut dan rangkum poin pentingnya menggunakan poin-poin. bahasanya tetap santai dan asik, pakai kata gue/lu.`;
-    const prompt = `rangkumin obrolan ini:\n${chatText}`;
+async function summarizeChatLog(transkripObrolan) {
+    const system = 'lu adalah perangkum tongkrongan. baca log chat berikut dan rangkum poin pentingnya menggunakan poin-poin. bahasanya tetap santai dan asik, pakai kata gue/lu.';
+    const prompt = `rangkumin obrolan ini:\n${transkripObrolan}`;
     
     const result = await callAIWithHybridRotation(prompt, false, system);
     return result.text || 'lagi ga bisa ngerangkum nih kepanjangan kayaknya';
