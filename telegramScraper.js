@@ -1,6 +1,9 @@
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
+const { Logger } = require('telegram/extensions'); // SUNTIKKAN EKSTENSI INI BRAY
+Logger.setLevel('error'); // KUNCI MATI LOG BERISIK BIAR TERMUX GA LAG
+
 const readline = require('readline');
 const fs = require('fs');
 const path = require('path');
