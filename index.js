@@ -1374,139 +1374,128 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 // Biarkan lolos ke logger grup bawah
             } else {
                 const state = userStates[fromJid];
-                    
-                    // ====================================================================
-                    // LAPIS 1: DETEKSI PERINTAH BAKU SLASH LOKAL (MUTLAK & INSTAN)
-                    // ====================================================================
-                    if (text.startsWith('/')) {
-                        const args = text.slice(1).trim().split(/\s+/);
-                        const subCmd = args[0].toLowerCase();
-                        const restText = args.slice(1).join(' ').trim();
+                
+                // ====================================================================
+                // LAPIS 1: DETEKSI PERINTAH BAKU SLASH LOKAL (MUTLAK & INSTAN)
+                // ====================================================================
+                if (text.startsWith('/')) {
+                    const args = text.slice(1).trim().split(/\s+/);
+                    const subCmd = args[0].toLowerCase();
+                    const restText = args.slice(1).join(' ').trim();
 
-                        if (subCmd === 'judul') {
-                            if (restText) state.data.judul = restText;
-                            await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                            return;
+                    if (subCmd === 'judul') {
+                        if (restText) state.data.judul = restText;
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+                    if (subCmd === 'waktu' || subCmd === 'jam') {
+                        const foundTime = restText.match(/\d{2}:\d{2}/)?.[0];
+                        if (foundTime) state.data.waktu = foundTime;
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+                    if (subCmd === 'alarm' || subCmd === 'pengingat') {
+                        const matches = restText.match(/\d+/g);
+                        if (matches) {
+                            state.data.customMilestones = matches.map(Number).sort((a, b) => b - a);
+                            state.data.intervalMinutes = null;
                         }
-                        if (subCmd === 'waktu' || subCmd === 'jam') {
-                            const foundTime = restText.match(/\d{2}:\d{2}/)?.[0];
-                            if (foundTime) state.data.waktu = foundTime;
-                            await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                            return;
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+                }
+
+                // ====================================================================
+                // LAPIS 2: JALUR CEPAT TOMBOL PENGUNCI JADWAL (MILIDETIK)
+                // ====================================================================
+                const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
+                
+                if (isYes) {
+                    const data = state.data;
+                    let targetTimestamp = Date.now();
+                    
+                    // Rekonstruksi matematika konversi jam dinding digital Jakarta yan
+                    if (data.waktu && data.waktu.includes(':')) {
+                        const [hour, minute] = data.waktu.split(':').map(Number);
+                        const now = new Date();
+                        const tParts = getJakartaDateComponents(now);
+                        
+                        let targetDate = new Date(`${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`);
+                        if (targetDate.getTime() <= now.getTime()) {
+                            targetDate.setDate(targetDate.getDate() + 1);
                         }
-                        if (subCmd === 'alarm' || subCmd === 'pengingat') {
-                            const matches = restText.match(/\d+/g);
-                            if (matches) {
-                                state.data.customMilestones = matches.map(Number).sort((a, b) => b - a);
-                                state.data.intervalMinutes = null;
-                            }
-                            await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                            return;
-                        }
+                        targetTimestamp = targetDate.getTime();
                     }
 
-                    // ====================================================================
-                    // LAPIS 2: JALUR CEPAT TOMBOL PENGUNCI JADWAL (MILIDETIK)
-                    // ====================================================================
-                    const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
+                    const intervalVal = data.intervalMinutes || 1;
+                    const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
+
+                    let targetJidsFinal = [fromJid];
+                    let finalScope = isGroup ? 'group' : 'personal';
                     
-                    if (isYes) {
-                        // SENSOR TARGET PENGIRIM DINAMIS DI LAPIS 2
-                        let targetJidsFinal = [fromJid];
-                        let finalScope = isGroup ? 'group' : 'personal';
+                    if (data.extractedTarget) {
+                        const cleanTargetStr = data.extractedTarget.toLowerCase();
+                        let mappedJids = [];
                         
-                        if (data.extractedTarget) {
-                            const cleanTargetStr = data.extractedTarget.toLowerCase();
-                            let mappedJids = [];
-                            
-                            if (cleanTargetStr === 'sender') {
-                                mappedJids.push(senderJid);
-                            } else {
-                                Object.entries(config.accountMapping || {}).forEach(([jid, name]) => {
-                                    if (cleanTargetStr.includes(name.toLowerCase())) {
-                                        mappedJids.push(jid);
-                                    }
-                                });
-                            }
-
-                            if (mappedJids.length > 0) {
-                                targetJidsFinal = mappedJids;
-                                // Jika dikirim ke nomor dirinya sendiri secara personal, scope diubah jadi personal bray
-                                finalScope = mappedJids[0] === senderJid && mappedJids.length === 1 ? 'personal' : 'tertarget'; 
-                            } else {
-                                const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
-                                if (foundContact) {
-                                    targetJidsFinal = [foundContact.jid];
-                                    finalScope = 'personal';
-                                }
-                            }
-                        }
-
-                        const intervalVal = data.intervalMinutes || 1;
-                        const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
-
-                        let targetJidsFinal = [fromJid];
-                        let finalScope = isGroup ? 'group' : 'personal';
-                        
-                        if (data.extractedTarget) {
-                            const cleanTargetStr = data.extractedTarget.toLowerCase();
-                            const mappedJids = [];
-                            
+                        if (cleanTargetStr === 'sender') {
+                            mappedJids.push(senderJid);
+                        } else {
                             Object.entries(config.accountMapping || {}).forEach(([jid, name]) => {
                                 if (cleanTargetStr.includes(name.toLowerCase())) {
                                     mappedJids.push(jid);
                                 }
                             });
-
-                            if (mappedJids.length > 0) {
-                                targetJidsFinal = mappedJids;
-                                finalScope = 'tertarget'; 
-                            } else {
-                                const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
-                                if (foundContact) {
-                                    targetJidsFinal = [foundContact.jid];
-                                    finalScope = 'personal';
-                                }
-                            }
                         }
 
-                        config.reminders.push({
-                            id: `ai_${Date.now().toString().slice(-4)}`,
-                            type: 'deadline',
-                            scope: finalScope,
-                            targetTimestamp: targetTimestamp,
-                            judul: data.judul || 'agenda kasual',
-                            message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
-                            manualFallback: data.judul || 'agenda kasual',
-                            nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
-                            nowManualFallback: data.judul || 'agenda kasual',
-                            milestones: finalMilestones,
-                            customMilestones: data.customMilestones || null,
-                            firedMilestones: [],
-                            pendingAITexts: {},
-                            targets: finalScope === 'group' ? ['group'] : targetJidsFinal, 
-                            mediaPath: null,
-                            mediaType: null,
-                            teamTracking: {},
-                            creator: data.creator || 'dyan',       
-                            creatorJid: data.creatorJid || '',
-                            withTracking: data.withTracking !== false,
-                            withReport: data.withReport !== false
-                        });
-
-                        config.reports = config.reports || [];
-                        saveConfig(config);
-                        resetState(fromJid);
-                        setupSchedules(sock);
-                        
-                        await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}` });
-                        return;
+                        if (mappedJids.length > 0) {
+                            targetJidsFinal = mappedJids;
+                            finalScope = mappedJids[0] === senderJid && mappedJids.length === 1 ? 'personal' : 'tertarget'; 
+                        } else {
+                            const foundContact = config.contacts?.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
+                            if (foundContact) {
+                                targetJidsFinal = [foundContact.jid];
+                                finalScope = 'personal';
+                            }
+                        }
                     }
 
-                    // ====================================================================
-                    // LAPIS 3: JALUR CERDAS INTERPRETASI KETIKAN KASUAL MANUSIA (AI BASIS SEMESTA)
-                    // ====================================================================
-                    const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
+                    config.reminders.push({
+                        id: `ai_${Date.now().toString().slice(-4)}`,
+                        type: 'deadline',
+                        scope: finalScope,
+                        targetTimestamp: targetTimestamp,
+                        judul: data.judul || 'agenda kasual',
+                        message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
+                        manualFallback: data.judul || 'agenda kasual',
+                        nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
+                        nowManualFallback: data.judul || 'agenda kasual',
+                        milestones: finalMilestones,
+                        customMilestones: data.customMilestones || null,
+                        firedMilestones: [],
+                        pendingAITexts: {},
+                        targets: finalScope === 'group' ? ['group'] : targetJidsFinal, 
+                        mediaPath: null,
+                        mediaType: null,
+                        teamTracking: {},
+                        creator: data.creator || 'dyan',       
+                        creatorJid: data.creatorJid || '',
+                        withTracking: data.withTracking !== false,
+                        withReport: data.withReport !== false
+                    });
+
+                    config.reports = config.reports || [];
+                    saveConfig(config);
+                    resetState(fromJid);
+                    setupSchedules(sock);
+                    
+                    await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}` });
+                    return;
+                }
+
+                // ====================================================================
+                // LAPIS 3: JALUR CERDAS INTERPRETASI KETIKAN KASUAL MANUSIA (AI BASIS SEMESTA)
+                // ====================================================================
+                const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
 Data draf saat ini: ${JSON.stringify(state.data)}
 User membalas dengan ketikan bebas: "${text}"
 
@@ -1546,63 +1535,59 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
   "balasan_chatan": string atau null
 }`;
 
-                    try {
-                        const { generateAIText } = require('./geminiClient');
-                        const aiRes = await generateAIText(promptDinamisAI, {}, '', '{}', false);
-                        const cleanJsonStr = aiRes.text.replace(/```json|```/gi, '').trim();
-                        const updateResult = JSON.parse(cleanJsonStr);
+                try {
+                    const { generateAIText } = require('./geminiClient');
+                    const aiRes = await generateAIText(promptDinamisAI, {}, '', '{}', false);
+                    const cleanJsonStr = aiRes.text.replace(/```json|```/gi, '').trim();
+                    const updateResult = JSON.parse(cleanJsonStr);
 
-                        if (updateResult.keputusan === 'batal') {
-                            resetState(fromJid);
-                            const teksBatal = updateResult.balasan_chatan || `oke siap bray, draf agenda resmi gue apus dari memori ya wkwk`;
-                            await sock.sendMessage(fromJid, { text: teksBatal.toLowerCase() }, { quoted: msg });
-                            return;
-                        }
+                    if (updateResult.keputusan === 'batal') {
+                        resetState(fromJid);
+                        const teksBatal = updateResult.balasan_chatan || `oke siap bray, draf agenda resmi gue apus dari memori ya wkwk`;
+                        await sock.sendMessage(fromJid, { text: teksBatal.toLowerCase() }, { quoted: msg });
+                        return;
+                    }
 
-                        if (updateResult.keputusan === 'edit') {
-                            // A. EKSEKUSI OPERASI PERMANEN: AMANKAN REVISI DATABASE KONTAK DI LUAR MEMORI JADWAL
-                            if (updateResult.update_database_kontak) {
-                                const dbKontak = updateResult.update_database_kontak;
-                                if (dbKontak.nama && dbKontak.nomor) {
-                                    const cleanNumOnly = dbKontak.nomor.replace(/[^0-9]/g, '');
-                                    
-                                    // KATUP PENGAMAN HAK AKSES: Wajib Owner, atau orang tersebut sedang mengubah nomor HP-nya sendiri yan!
-                                    const isSelfChanging = senderJid.startsWith(cleanNumOnly);
-                                    if (fromJid === config.ownerJid || isSelfChanging) {
-                                        const formattedJidTarget = `${cleanNumOnly}@s.whatsapp.net`;
-                                        config.accountMapping[formattedJidTarget] = dbKontak.nama.toLowerCase();
-                                        saveConfig(config);
-                                        console.log(`[database] sukses update kontak via draf kasual: ${dbKontak.nama} -> ${cleanNumOnly}`);
-                                    } else {
-                                        await sock.sendMessage(fromJid, { text: `gagal update nomor orang lain bray, hak akses database kontak dikunci khusus owner sirkel kuliah.` }, { quoted: msg });
-                                    }
+                    if (updateResult.keputusan === 'edit') {
+                        if (updateResult.update_database_kontak) {
+                            const dbKontak = updateResult.update_database_kontak;
+                            if (dbKontak.nama && dbKontak.nomor) {
+                                const cleanNumOnly = dbKontak.nomor.replace(/[^0-9]/g, '');
+                                const isSelfChanging = senderJid.startsWith(cleanNumOnly);
+                                if (fromJid === config.ownerJid || isSelfChanging) {
+                                    const formattedJidTarget = `${cleanNumOnly}@s.whatsapp.net`;
+                                    config.accountMapping[formattedJidTarget] = dbKontak.nama.toLowerCase();
+                                    saveConfig(config);
+                                    console.log(`[database] sukses update kontak via draf kasual: ${dbKontak.nama} -> ${cleanNumOnly}`);
+                                } else {
+                                    await sock.sendMessage(fromJid, { text: `gagal update nomor orang lain bray, hak akses database kontak dikunci khusus owner sirkel kuliah.` }, { quoted: msg });
                                 }
                             }
-
-                            // B. EKSEKUSI OPERASI RAM JADWAL SEPERTI BIASA
-                            const params = updateResult.parameter_berubah || {};
-                            Object.keys(params).forEach(key => {
-                                if (params[key] !== undefined && params[key] !== null) {
-                                    state.data[key] = params[key];
-                                } else if (params[key] === null && (key === 'intervalMinutes' || key === 'customMilestones')) {
-                                    state.data[key] = null; 
-                                }
-                            });
-                            await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                            return;
                         }
 
-                        if (updateResult.keputusan === 'chat') {
-                            const teksChat = updateResult.balasan_chatan || `mau lanjut chatan aja atau draf agenda "${state.data.judul}" nya mau disimpen nih bray?`;
-                            await sock.sendMessage(fromJid, { text: teksChat.toLowerCase() }, { quoted: msg });
-                            return;
-                        }
-
-                    } catch (err) {
-                        console.error('gagal parsing keputusan draf AI universal:', err.message);
-                        await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, draf agenda "${state.data.judul}" mau lu simpen (ketik iya), lu edit parameter, atau mau dibatalin nih?` }, { quoted: msg });
+                        const params = updateResult.parameter_berubah || {};
+                        Object.keys(params).forEach(key => {
+                            if (params[key] !== undefined && params[key] !== null) {
+                                state.data[key] = params[key];
+                            } else if (params[key] === null && (key === 'intervalMinutes' || key === 'customMilestones')) {
+                                state.data[key] = null; 
+                            }
+                        });
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
                     }
+
+                    if (updateResult.keputusan === 'chat') {
+                        const teksChat = updateResult.balasan_chatan || `mau lanjut chatan aja atau draf agenda "${state.data.judul}" nya mau disimpen nih bray?`;
+                        await sock.sendMessage(fromJid, { text: teksChat.toLowerCase() }, { quoted: msg });
+                        return;
+                    }
+
+                } catch (err) {
+                    console.error('gagal parsing keputusan draf AI universal:', err.message);
+                    await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, draf agenda "${state.data.judul}" mau lu simpen (ketik iya), lu edit parameter, atau mau dibatalin nih?` }, { quoted: msg });
                 }
+            }
             return;
         }
 
@@ -1710,8 +1695,8 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
                 }
 
-                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1); //
-
+                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1, intentData.customMilestones);
+                
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
                     const reply = await generateDynamicStateText(`ini yakin gue ngingetin ${calculated.length} kali gempor gue gila bray server bisa meledak coba benerin lagi maksud lu gimana mau diganti tiap berapa menit`, currentNick, samples, chatMemory[fromJid] || []);
