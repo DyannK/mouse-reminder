@@ -553,8 +553,6 @@ async function generateAndSendTeamReport(sock, reminder, config) {
     }
 }
 
-// Tambahkan variabel penanda waktu bot mulai di luar fungsi (di bagian atas file bray)
-const botStartTime = Date.now();
 
 async function checkDeadlines(sock) {
     if (isCheckingDeadlines) return;
