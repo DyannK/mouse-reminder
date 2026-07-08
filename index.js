@@ -221,7 +221,6 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
 }
 
 async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null) {
-    // Gunakan variabel targetText secara konsisten bray
     let targetText = data.extractedTarget ? `nomor pribadi ${data.extractedTarget}` : 'kelompok di grup ini';
     
     const intervalVal = data.intervalMinutes || 1;
@@ -231,15 +230,17 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null) {
         `• *judul aktivitas*: ${data.judul || 'agenda kasual'}\n` +
         `• *pembuat agenda*: ${data.creator || 'tidak dikenal'} (${data.creatorJid || 'tidak ada nomor'})\n` +
         `• *waktu sasaran*: jam ${data.waktu || 'belum diset'} wib\n` +
-        `• *target penerima*: ${targetText}\n` + // Menggunakan targetText yang benar bray
+        `• *target penerima*: ${targetText}\n` + 
+        `• *status pelacakan*: ${data.withTracking !== false ? 'aktif' : 'nonaktif atau silent'}\n` +
+        `• *status laporan*: ${data.withReport !== false ? 'aktif' : 'nonaktif'}\n` +
         `• *skema alarm*: ${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)\n` +
-        `• *template durasi (mundur)*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
-        `• *template eksekusi (sekarang)*: "${data.pesanNow || `sekarang waktunya {judul} coy!`}"\n\n` +
+        `• *template durasi*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
+        `• *template eksekusi*: "${data.pesanNow || `sekarang waktunya {judul} bray!`}"\n\n` +
         `📝 *sistem pengubah parameter diterima*:\n` +
-        `lu bisa ketik kalimat kasual untuk mengubah manifes di atas secara langsung.\n\n` +
+        `lu bisa ketik kalimat kasual untuk mengubah manifes di atas secara langsung.\n` +
+        `contoh: "ganti judul...", "matikan pelacakan", "matikan laporan".\n\n` +
         `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
 
-    // Kirim menggunakan parameter jid yang valid sesuai deklarasi fungsi bray
     await sock.sendMessage(jid, { text: confirmationText }, { quoted: quotedMsg });
 }
 
@@ -289,7 +290,7 @@ async function handleListDetail(sock, fromJid) {
         if (r.mediaPath) msg += `• berkas media: ${path.basename(r.mediaPath)}\n`;
         msg += `-------------------------------------------\n`;
     });
-    await sock.sendMessage(fromJid, { text: msg.trim().toLowerCase() });
+    await sock.sendMessage(fromJid, { text: msg.trim() });
 }
 
 async function resolveTemplateForJid(messageTemplate, manualFallback, jid, context = {}, formal = false) {
@@ -423,6 +424,9 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
             const memberJid = member.id;
             if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) continue;
 
+            // KATUP PENYARING JID KHUSUS SCOPE TERTARGET YAN BRAY!
+            if (reminder.scope === 'tertarget' && !reminder.targets.includes(memberJid)) continue;
+
             const userTrack = reminder.teamTracking[memberJid] || { status: 'Belum Respon' };
 
             // STRATEGI 1: JIKA ANGGOTA SUDAH PASTI ABSEN (SELESAI INTEROGASI), LANGSUNG LEWATI
@@ -497,6 +501,9 @@ async function generateAndSendTeamReport(sock, reminder, config) {
         for (const member of members) {
             const jid = member.id;
             if (jid.includes(botJidNumber)) continue;
+
+            // FILTER BIAR ISI LAPORAN AKHIR OBJEKTIF CUMA NAMPILIN TARGET NYA AJA
+            if (reminder.scope === 'tertarget' && !reminder.targets.includes(jid)) continue;
 
             const namaOrang = config.accountMapping?.[jid] || (jid === config.ownerJid ? 'pemilik' : jid.split('@')[0]);
             const track = reminder.teamTracking?.[jid] || { status: 'Belum Respon', reason: '', isDelivered: true };
@@ -590,11 +597,14 @@ async function checkDeadlines(sock) {
                 const triggerTs = computeTriggerTimestamp(milestone, reminder.targetTimestamp);
 
                 if (Date.now() >= triggerTs) {
-                    if (reminder.scope === 'group') await handleGroupTeamDistribution(sock, reminder, milestone, config);
-                    if (milestone.isAuto && reminder.scope === 'group') {
-                        // Tunda 5 menit untuk memberikan toleransi absen akhir sebelum laporan terbit bray
+                    // SAKLAR PELACAKAN WAJIB AKTIF DAN SCOPE HARUS COCOK BRAY
+                    if ((reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withTracking !== false) {
+                        await handleGroupTeamDistribution(sock, reminder, milestone, config);
+                    }
+                    
+                    // SAKLAR LAPORAN SEKARANG IKUT MENJADI KATUP PENYARING UTAMA YAN
+                    if (milestone.isAuto && (reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withReport !== false) {
                         setTimeout(async () => {
-                            // Muat ulang config paling segar dari memori lokal biar data menit terakhir ikut kejaring
                             const freshConfig = loadConfig();
                             const freshReminder = freshConfig.reminders.find(r => r.id === reminder.id) || reminder;
                             await generateAndSendTeamReport(sock, freshReminder, freshConfig);
@@ -842,9 +852,9 @@ async function startBot() {
                 4. Hilangkan identitas lu sebagai robot atau AI. Jawab langsung dengan daftar pointer teks kasual tersebut tanpa kalimat basa-basi pembuka atau penutup kaku bray.`;
                 
                 const { generateAIText } = require('./geminiClient');
-                const aiGroupRes = await generateAIText(analisisGrupPrompt, {}, '', 'sori bray otak gue lagi agak nge-lag, coba jelasin intinya aja', false);
+                const aiGroupRes = await generateAIText(analisisGrupPrompt, {}, '', 'sorry bray otak gue lagi agak nge-lag, coba jelasin intinya aja', false);
                 
-                await sock.sendMessage(fromJid, { text: aiGroupRes.text.trim().toLowerCase() }, { quoted: msg });
+                await sock.sendMessage(fromJid, { text: aiGroupRes.text.trim() }, { quoted: msg });
                 return;
             }
         }
@@ -915,33 +925,39 @@ async function startBot() {
             resetState(fromJid);
             const cmd = text.trim().toLowerCase();
             if (cmd === '/help') {
-                const menuHelp = `🛠 *MENU UTAMA BANTUAN SINTAKSIS REMINDER BOT*\n` +
+                resetState(fromJid);
+                const menuHelp = `🛠 *PANDUAN LENGKAP PENGGUNAAN ASISTEN REMINDER BOT*\n` +
                     `--------------------------------------------------------\n\n` +
-                    `📌 *PENGELOLAAN AGENDA MANUAL*\n` +
-                    `• */tambah [Menit] [Jam] [Tgl] [Bulan] [Hari] | [Pesan]*\n` +
-                    `  _Definisi_: Membuat pengingat alarm rutin jangka panjang.\n` +
-                    `  _Contoh_: \`/tambah 0 7 * * * | bangun bray kuliah\`\n\n` +
-                    `• */tambahdeadline [DD-MM-YYYY HH:MM] | [Judul] | [Milestones]*\n` +
-                    `  _Definisi_: Membuat target deadline satu kali eksekusi.\n` +
-                    `  _Contoh_: \`/tambahdeadline 07-07-2026 13:00 | uas elka | 1hari,2jam\`\n\n` +
-                    `• */editpesan [id_agenda] [teks_template]*\n` +
-                    `  _Definisi_: Mengubah isi teks pengingat durasi mundur.\n` +
-                    `  _Contoh_: \`/editpesan ai_1510 ai:ingetin waktu kurang {sisa}\`\n\n` +
-                    `• */editpesannow [id_agenda] [teks_template]*\n` +
-                    `  _Definisi_: Mengubah isi teks pengingat pas waktu eksekusi.\n` +
-                    `  _Contoh_: \`/editpesannow ai_1510 sekarang waktunya {judul}\`\n\n` +
-                    `📌 *PENGATURAN PROFIL GAYA BAHASA*\n` +
-                    `• */gayabicara [deskripsi_gaya]*\n` +
-                    `  _Definisi_: Mengatur karakteristik ketikan lu secara manual di database.\n` +
-                    `  _Contoh_: \`/gayabicara orangnya santai wajib pakai gue lo suka ketawa wkwk\`\n\n` +
-                    `📌 *PEMERIKSAAN & ANALISIS OBROLAN*\n` +
-                    `• */list* : Menampilkan seluruh daftar agenda secara singkat.\n` +
-                    `• */listdetail* : Membedah parameter isi database secara transparan.\n` +
-                    `• */rangkuman [jumlah_bubble]*\n` +
-                    `  _Definisi_: Merangkum sejarah chat grup menjadi poin ringkas.\n` +
-                    `  _Contoh_: \`/rangkuman 200\``;
+                    `Sistem ini dirancang buat jagain agenda personal sekaligus mantau keaktifan anggota kelompok kuliah secara otomatis bray. Berikut adalah daftar perintah yang bisa lu gunain:\n\n` +
+                    `📌 *1. PENGELOLAAN AGENDA RUTIN BERULANG*\n` +
+                    `Perintah ini digunain buat bikin alarm pengingat yang bakal bunyi terus secara konsisten mengikuti pola waktu tertentu bray.\n` +
+                    `• *Format*: \`/tambah [menit] [jam] [tanggal] [bulan] [hari] | [pesan pengingat]\`\n` +
+                    `• *Contoh*: \`/tambah 0 7 * * * | bangun bray kuliah elka malem\`\n` +
+                    `_(Catatan: Tanda bintang artinya berjalan setiap waktu tanpa batas)_\n\n` +
+                    `📌 *2. PENGELOLAAN TENGGAT WAKTU TUGAS KULIAH*\n` +
+                    `Perintah ini dipake buat bikin target satu kali eksekusi tugas kelompok yang butuh hitung mundur dinamis bray.\n` +
+                    `• *Format*: \`/tambahdeadline [tanggal-bulan-tahun jam:menit] | [judul tugas] | [tangga alarm]\`\n` +
+                    `• *Contoh*: \`/tambahdeadline 08-07-2026 13:00 | kuis power electronics | 1hari,2jam,15menit\`\n\n` +
+                    `📌 *3. INTEGRASI PENGERUKAN INFORMASI TELEGRAM*\n` +
+                    `Lu bisa ngintip informasi pengumuman penting dari Telegram dan meneruskannya langsung ke grup WhatsApp sirkel lu bray.\n` +
+                    `• */tglist [nama_grup]* : Mengintip 10 daftar isi percakapan terakhir di grup Telegram sasaran bray.\n` +
+                    `• */tgforward [nama_grup] [nomor_id_pesan]* : Meneruskan secara resmi pesan pilihan dari Telegram ke grup WhatsApp dalam resolusi tinggi asli tanpa kompresi burik bray.\n\n` +
+                    `📌 *4. MANAJEMEN ARSIP LAPORAN KELOMPOK*\n` +
+                    `Setiap tugas kelompok selesai, asisten bakal ngarsip data keaktifan anak-anak secara permanen di database bray.\n` +
+                    `• */listlaporan* : Menampilkan semua daftar arsip laporan kelompok yang pernah dibuat bray.\n` +
+                    `• */detaillaporan [id_arsip]* : Membongkar isi teks laporan keaktifan secara utuh bray.\n` +
+                    `• */hapuslaporan [id_arsip]* : Menghapus berkas arsip lama dari penyimpanan peladen bray.\n\n` +
+                    `📌 *5. MODIFIKASI PARAMETER PAS PROSES KONFIRMASI DRAF*\n` +
+                    `Pas lu bikin agenda baru lewat obrolan kasual, bot bakal nampilin draf pratinjau dulu bray. Lu bisa ketik kalimat santai berikut buat ngubah manifesnya sebelum disimpan:\n` +
+                    `• *ganti judul jadi...* : Mengubah nama aktivitas agenda bray.\n` +
+                    `• *ganti waktu jadi...* : Mengubah jam target operasi bray.\n` +
+                    `• *matikan pelacakan* : Mengubah agenda jadi ramah tanpa perlu neror chat pribadi anggota sirkel bray.\n` +
+                    `• *matikan laporan* : Mengunci bot agar tidak mengirim draf laporan keaktifan kelompok ke grup utama bray.\n\n` +
+                    `📌 *6. ANALISIS PERCAKAPAN & PROFIL BAHASA*\n` +
+                    `• */rangkuman [jumlah_pesan]* : Merangkum silang pendapat atau alur obrolan grup yang panjang menjadi poin strip ringkas bray.\n` +
+                    `• *panggil gue [nama_panggilan]* : Mendaftarkan nama panggilan asli lu ke database kamus mapping biar gaya bicara bot pas nyapa jadi lebih personal bray.`;
 
-                await sock.sendMessage(fromJid, { text: menuHelp.toLowerCase() }, { quoted: msg });
+                await sock.sendMessage(fromJid, { text: menuHelp }, { quoted: msg });
                 return;
             }
             if (cmd === '/listdetail') {
@@ -1223,6 +1239,31 @@ async function startBot() {
                     await sendDetailedConfirmation(sock, fromJid, state.data, msg);
                     return;
                 }
+                if (/matikan pelacakan|nonaktifkan pelacakan|tanpa pelacakan|pelacakan mati/i.test(lowText)) {
+                    state.data.withTracking = false;
+                    state.data.withReport = false; // Aturan ketergantungan mutlak yan bray!
+                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                    return;
+                }
+                if (/aktifkan pelacakan|nyalakan pelacakan/i.test(lowText)) {
+                    state.data.withTracking = true;
+                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                    return;
+                }
+                if (/matikan laporan|nonaktifkan laporan|tanpa laporan|laporan mati/i.test(lowText)) {
+                    state.data.withReport = false;
+                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                    return;
+                }
+                if (/aktifkan laporan|nyalakan laporan/i.test(lowText)) {
+                    if (state.data.withTracking === false) {
+                        await sock.sendMessage(fromJid, { text: `ga bisa aktifin laporan kalau pelacakannya mati bray, aktifin pelacakan dulu yan` }, { quoted: msg });
+                        return;
+                    }
+                    state.data.withReport = true;
+                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                    return;
+                }
 
                 const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
                 const isChat = /\b(chatan|ngobrol|chat|basa basi)\b/i.test(lowText) || lowText.includes('chatan');
@@ -1246,14 +1287,32 @@ async function startBot() {
                     const intervalVal = data.intervalMinutes || 1;
                     const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
 
-                    let targetJidFinal = fromJid;
+                    // ====================================================================
+                    // MESIN OTOMATISASI SCOPE TERTARGET BERDASARKAN MAPPING NAMA YAN BRAY
+                    // ====================================================================
+                    let targetJidsFinal = [fromJid];
                     let finalScope = isGroup ? 'group' : 'personal';
                     
                     if (data.extractedTarget) {
-                        const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
-                        if (foundContact) {
-                            targetJidFinal = foundContact.jid;
-                            finalScope = 'personal';
+                        const cleanTargetStr = data.extractedTarget.toLowerCase();
+                        const mappedJids = [];
+                        
+                        // Sisir database kamus nama untuk mencari JID Yoga atau Fizar bray
+                        Object.entries(config.accountMapping || {}).forEach(([jid, name]) => {
+                            if (cleanTargetStr.includes(name.toLowerCase())) {
+                                mappedJids.push(jid);
+                            }
+                        });
+
+                        if (mappedJids.length > 0) {
+                            targetJidsFinal = mappedJids;
+                            finalScope = 'tertarget'; // Resmi beralih ke jalur tertarget yan bray!
+                        } else {
+                            const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
+                            if (foundContact) {
+                                targetJidsFinal = [foundContact.jid];
+                                finalScope = 'personal';
+                            }
                         }
                     }
 
@@ -1270,16 +1329,17 @@ async function startBot() {
                         milestones: finalMilestones,
                         firedMilestones: [],
                         pendingAITexts: {},
-                        targets: [finalScope === 'group' ? 'group' : targetJidFinal],
+                        targets: finalScope === 'group' ? ['group'] : targetJidsFinal, // Simpan daftar array JID targetnya yan
                         mediaPath: null,
                         mediaType: null,
                         teamTracking: {},
-                        creator: data.creator || 'dyan',       // Kunci nama ke config utama bray
-                        creatorJid: data.creatorJid || ''      // Kunci nomor hp ke config utama bray
+                        creator: data.creator || 'dyan',       
+                        creatorJid: data.creatorJid || '',
+                        withTracking: data.withTracking !== false,
+                        withReport: data.withReport !== false
                     });
 
                     config.reports = config.reports || [];
-
                     saveConfig(config);
                     resetState(fromJid);
                     setupSchedules(sock);
@@ -1367,9 +1427,17 @@ async function startBot() {
             const intentData = await parseIntentFromText(processingText);
 
             if (intentData.intent === 'create_schedule') {
-                // SUNTIKKAN IDENTITAS DALANG PEMBUAT AGENDA
                 intentData.creator = currentNick;
                 intentData.creatorJid = senderJid.split('@')[0];
+
+                // OTOMATISASI SAKLAR BERDASARKAN TARGET UTAMA YAN
+                if (intentData.extractedTarget) {
+                    intentData.withTracking = false;
+                    intentData.withReport = false;
+                } else {
+                    intentData.withTracking = true;
+                    intentData.withReport = true;
+                }
 
                 // GERBANG INTERAKTIF: CEK APAKAH WAKTU HARI INI SUDAH LEWAT YAN BRAY!
                 if (intentData.waktu && intentData.waktu.includes(':')) {
@@ -1388,7 +1456,7 @@ async function startBot() {
                         const { generateAIText } = require('./geminiClient');
                         const aiRes = await generateAIText(pastTimePrompt, {}, '', 'waktu agenda yg lo targetkan buat udah lewat, mau dirubah besok atau mau gue hapus karna lo salah ketik?', false);
                         
-                        await sock.sendMessage(fromJid, { text: aiRes.text.trim().toLowerCase() }, { quoted: msg });
+                        await sock.sendMessage(fromJid, { text: aiRes.text.trim() }, { quoted: msg });
                         return;
                     }
                 }
@@ -1461,7 +1529,7 @@ async function startBot() {
                         const { generateAIText } = require('./geminiClient');
                         const aiRestartRes = await generateAIText(restartPrompt, {}, '', 'gue gatau bray servernya baru aja restart wkwk jadi ga nyimak percakapan lo pada sorry yaaa', false);
                         
-                        await sock.sendMessage(fromJid, { text: aiRestartRes.text.trim().toLowerCase() }, { quoted: msg });
+                        await sock.sendMessage(fromJid, { text: aiRestartRes.text.trim() }, { quoted: msg });
                         return;
                     }
 
