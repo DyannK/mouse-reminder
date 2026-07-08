@@ -226,7 +226,12 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null) {
     let targetText = data.extractedTarget ? `nomor pribadi ${data.extractedTarget}` : 'kelompok di grup ini';
     
     const intervalVal = data.intervalMinutes || 1;
-    const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
+    // Oper data customMilestones ke dalam mesin kalkulator bawaan berkas lo yan bray
+    const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
+
+    let skemaText = data.customMilestones 
+        ? `kustom pada menit ke [${data.customMilestones.join(', ')}] terakhir sebelum mulai` 
+        : `${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)`;
 
     let confirmationText = `📋 *[konfirmasi agenda]*\n` +
         `• *judul aktivitas*: ${data.judul || 'agenda kasual'}\n` +
@@ -235,15 +240,15 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null) {
         `• *target penerima*: ${targetText}\n` + 
         `• *status pelacakan*: ${data.withTracking !== false ? 'aktif' : 'nonaktif atau silent'}\n` +
         `• *status laporan*: ${data.withReport !== false ? 'aktif' : 'nonaktif'}\n` +
-        `• *skema alarm*: ${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)\n` +
+        `• *skema alarm*: ${skemaText}\n` + 
         `• *template durasi*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
         `• *template eksekusi*: "${data.pesanNow || `sekarang waktunya {judul} bray!`}"\n\n` +
         `📝 *sistem pengubah parameter diterima*:\n` +
         `lu bisa ketik kalimat kasual untuk mengubah manifes di atas secara langsung.\n` +
-        `contoh: "ganti judul...", "matikan pelacakan", "matikan laporan".\n\n` +
+        `contoh: "ganti judul...", "ganti alarm...", "matikan laporan".\n\n` +
         `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
 
-    await sock.sendMessage(jid, { text: confirmationText }, { quoted: quotedMsg });
+    await sock.sendMessage(jid, { text: confirmationText }, { quoted: msg || quotedMsg });
 }
 
 function translateCronToHuman(cronPattern) {
@@ -1214,6 +1219,7 @@ async function startBot() {
         }
 
         // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
+        // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
             // JIKA DI GRUP DAN LU GA NGETAG BOT, BIARKAN CHAT LEWAT JANGAN DIINTERCEPT YAN!
             if (isGroup && !isBotMentioned) {
@@ -1221,87 +1227,9 @@ async function startBot() {
             } else {
                 const state = userStates[fromJid];
                 
-                if (['gajadi', 'batal', 'cancel', 'ntar aja'].some(w => lowText.includes(w))) {
-                    resetState(fromJid);
-                    const reply = await generateDynamicStateText(`oke bray pembuatan jadwal dibatalin ya ${currentNick}`, currentNick, samples, chatMemory[fromJid] || []);
-                    pushToMemory(fromJid, 'bot', reply);
-                    await sock.sendMessage(fromJid, { text: reply }, { quoted: msg });
-                    return;
-                }
-
-                if (/ganti judul|ubah judul/i.test(lowText)) {
-                    state.data.judul = text.replace(/ganti judul jadi|ubah judul jadi|ganti judul|ubah judul/gi, '').trim();
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                if (/ganti jam|ubah jam|ganti waktu|ubah waktu/i.test(lowText)) {
-                    const foundTime = text.match(/\d{2}:\d{2}/)?.[0];
-                    if (foundTime) state.data.waktu = foundTime;
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                
-                // AKOMODASI SINTAKS KASUAL BARU: bisa menangkap perintah "ganti pesan ai:" lu yan
-                if (/ganti pesan durasi|ubah pesan durasi|ganti template durasi|ganti pesan ai|ubah pesan ai/i.test(lowText)) {
-                    state.data.pesanDurasi = text.replace(/ganti pesan durasi jadi|ubah pesan urban jadi|ganti template durasi jadi|ganti pesan durasi|ubah pesan durasi|ganti pesan ai jadi|ganti pesan ai:|ubah pesan ai jadi/gi, '').trim();
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                if (/ganti pesan sekarang|ubah pesan sekarang|ganti pesan eksekusi|ubah pesan eksekusi/i.test(lowText)) {
-                    state.data.pesanNow = text.replace(/ganti pesan sekarang jadi|ubah pesan sekarang jadi|ganti pesan eksekusi jadi|ubah pesan eksekusi jadi|ganti pesan sekarang|ganti pesan eksekusi/gi, '').trim();
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-
-                if (/ganti interval|ubah interval|tiap|per/i.test(lowText)) {
-                    const matchDigits = lowText.match(/\d+/);
-                    if (matchDigits) {
-                        let min = parseInt(matchDigits[0], 10);
-                        if (lowText.includes('jam')) min *= 60;
-                        state.data.intervalMinutes = min;
-                    }
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                if (/ganti target|ubah target/i.test(lowText)) {
-                    state.data.extractedTarget = text.replace(/ganti target jadi|ubah target jadi|ganti target|ubah target/gi, '').trim();
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                if (/hapus target/i.test(lowText)) {
-                    state.data.extractedTarget = null;
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                if (/matikan pelacakan|nonaktifkan pelacakan|tanpa pelacakan|pelacakan mati/i.test(lowText)) {
-                    state.data.withTracking = false;
-                    state.data.withReport = false; // Aturan ketergantungan mutlak yan bray!
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                if (/aktifkan pelacakan|nyalakan pelacakan/i.test(lowText)) {
-                    state.data.withTracking = true;
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                if (/matikan laporan|nonaktifkan laporan|tanpa laporan|laporan mati/i.test(lowText)) {
-                    state.data.withReport = false;
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-                if (/aktifkan laporan|nyalakan laporan/i.test(lowText)) {
-                    if (state.data.withTracking === false) {
-                        await sock.sendMessage(fromJid, { text: `ga bisa aktifin laporan kalau pelacakannya mati bray, aktifin pelacakan dulu yan` }, { quoted: msg });
-                        return;
-                    }
-                    state.data.withReport = true;
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
-                }
-
+                // LAPIS 1: JALUR CEPAT INSTAN (Merespon dalam hitungan milidetik jika ketikan lo adalah pengunci)
                 const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
-                const isChat = /\b(chatan|ngobrol|chat|basa basi)\b/i.test(lowText) || lowText.includes('chatan');
-
+                
                 if (isYes) {
                     const data = state.data;
                     let targetTimestamp = Date.now();
@@ -1319,11 +1247,8 @@ async function startBot() {
                     }
 
                     const intervalVal = data.intervalMinutes || 1;
-                    const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal);
+                    const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
 
-                    // ====================================================================
-                    // MESIN OTOMATISASI SCOPE TERTARGET BERDASARKAN MAPPING NAMA YAN BRAY
-                    // ====================================================================
                     let targetJidsFinal = [fromJid];
                     let finalScope = isGroup ? 'group' : 'personal';
                     
@@ -1331,7 +1256,6 @@ async function startBot() {
                         const cleanTargetStr = data.extractedTarget.toLowerCase();
                         const mappedJids = [];
                         
-                        // Sisir database kamus nama untuk mencari JID Yoga atau Fizar bray
                         Object.entries(config.accountMapping || {}).forEach(([jid, name]) => {
                             if (cleanTargetStr.includes(name.toLowerCase())) {
                                 mappedJids.push(jid);
@@ -1340,7 +1264,7 @@ async function startBot() {
 
                         if (mappedJids.length > 0) {
                             targetJidsFinal = mappedJids;
-                            finalScope = 'tertarget'; // Resmi beralih ke jalur tertarget yan bray!
+                            finalScope = 'tertarget'; 
                         } else {
                             const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
                             if (foundContact) {
@@ -1361,9 +1285,10 @@ async function startBot() {
                         nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
                         nowManualFallback: data.judul || 'agenda kasual',
                         milestones: finalMilestones,
+                        customMilestones: data.customMilestones || null, // Kunci skema kustom di database berkas lo yan bray
                         firedMilestones: [],
                         pendingAITexts: {},
-                        targets: finalScope === 'group' ? ['group'] : targetJidsFinal, // Simpan daftar array JID targetnya yan
+                        targets: finalScope === 'group' ? ['group'] : targetJidsFinal, 
                         mediaPath: null,
                         mediaType: null,
                         teamTracking: {},
@@ -1379,16 +1304,76 @@ async function startBot() {
                     setupSchedules(sock);
                     
                     await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}` });
-                } else if (isChat) {
-                    setState(fromJid, 'chat');
-                    const reply = await generateDynamicStateText('oke gas mau ngobrolin apaan nih', currentNick, samples, chatMemory[fromJid] || []);
-                    await sock.sendMessage(fromJid, { text: reply });
-                } else {
-                    const reply = await generateDynamicStateText('mau lanjut chatan aja atau fix buat agenda nih balas iya atau chatan', currentNick, samples, chatMemory[fromJid] || []);
-                    await sock.sendMessage(fromJid, { text: reply });
+                    return;
                 }
-                return;
+
+                // LAPIS 2: JALUR CERDAS AI (Mencerna kalimat pembatalan kustom dan koreksi parameter sebebas mungkin bray)
+                const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
+Data draf saat ini: ${JSON.stringify(state.data)}
+User membalas dengan ketikan bebas: "${text}"
+
+Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentuk JSON objek murni untuk menentukan tipe keputusan:
+1. "batal": Jika user menggunakan kalimat pembatalan kasual/kaku (seperti: "ga jadi deh", "batalin aja", "gajadi", "cancel", "ntar aja dah pusing"). Kalimat balasan berupa penutupan lowercase ramah.
+2. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, atau memberikan skema alarm pengingat kustom baru).
+3. "chat": Jika ketikan user di luar konteks pembatalan atau perbaikan draf (hanya basa-basi santai). Kalimat balasan berupa ketikan santai tongkrongan lowercase.
+
+Aturan pengubahan parameter objek jika keputusan bernilai "edit":
+- Jika user meminta alarm/pengingat di menit-menit tertentu (misal: di 20 menit, 10 menit, 5 menit, dan 3 menit terakhir), ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
+- Jika user mengubah judul, isi properti "judul" dengan nama agenda baru yang bersih dari kata sampah pengetikan (seperti "ganti", "deh", "jadi", "judulnya").
+- Jika user mengubah jam/waktu, isi properti "waktu" dengan format HH:MM digital.
+- Jika ada parameter lain yang mau diubah (seperti matikan pelacakan dll), biarkan Gemini menyesuaikannya di properti tambahan jika perlu.
+
+Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
+{
+  "keputusan": "edit" | "batal" | "chat",
+  "parameter_berubah": {
+    "judul": "string atau null",
+    "waktu": "string atau null",
+    "customMilestones": [array atau null],
+    "intervalMinutes": 1
+  },
+  "balasan_chatan": "string atau null"
+}`;
+
+                try {
+                    const { generateAIText } = require('./geminiClient');
+                    const aiRes = await generateAIText(promptDinamisAI, {}, '', '{}', false);
+                    const cleanJsonStr = aiRes.text.replace(/```json|```/gi, '').trim();
+                    const updateResult = JSON.parse(cleanJsonStr);
+
+                    if (updateResult.keputusan === 'batal') {
+                        resetState(fromJid);
+                        const teksBatal = updateResult.balasan_chatan || `oke siap bray, draf agenda resmi gue apus dari memori ya wkwk`;
+                        await sock.sendMessage(fromJid, { text: teksBatal.toLowerCase() }, { quoted: msg });
+                        return;
+                    }
+
+                    if (updateResult.keputusan === 'edit') {
+                        const params = updateResult.parameter_berubah || {};
+                        Object.keys(params).forEach(key => {
+                            if (params[key] !== undefined && params[key] !== null) {
+                                state.data[key] = params[key];
+                            } else if (params[key] === null && (key === 'intervalMinutes' || key === 'customMilestones')) {
+                                state.data[key] = null; // Sinkronisasi katup kosong bray
+                            }
+                        });
+                        // Cetak draf teranyar hasil rakitan kecerdasan buatan bray
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+
+                    if (updateResult.keputusan === 'chat') {
+                        const teksChat = updateResult.balasan_chatan || `mau lanjut chatan aja atau draf agenda "${state.data.judul}" nya mau disimpen nih bray?`;
+                        await sock.sendMessage(fromJid, { text: teksChat.toLowerCase() }, { quoted: msg });
+                        return;
+                    }
+
+                } catch (err) {
+                    console.error('gagal parsing keputusan draf AI:', err.message);
+                    await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, draf agenda "${state.data.judul}" mau lu simpen (ketik iya), lu edit parameter, atau mau dibatalin nih?` }, { quoted: msg });
+                }
             }
+            return;
         }
 
         // 5. INTERLOCK PEMBATALAN OVER-LIMIT DEBAT INTERAKTIF MILESTONES
