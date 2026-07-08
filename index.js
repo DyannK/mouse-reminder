@@ -24,10 +24,21 @@ const groupCache = {}; // Tempat simpan memori grup biar ga diblokir server
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
+// ====================================================================
+// PELINDUNG GLOBAL AGAR PELADEN TERMUX TIDAK MUDAH MATI TOTAL
+// ====================================================================
+process.on('uncaughtException', (err) => {
+    console.error('terdeteksi error global bray:', err.message);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('terdeteksi janji error ga ketangkap bray:', reason);
+});
+
 let scheduledTasks = [];
 let botJidNumber = null;
-let botLidNumber = null; // Tambahkan baris ini bray
+let botLidNumber = null; 
 let isCheckingDeadlines = false;
+const botStartTime = Date.now(); // Rekam waktu pertama kali bot dinyalain yan
 
 // 1. MEMORI JANGKA PENDEK RAM KHUSUS LIVE OPINI GRUP (MAKSIMAL 60 CHAT)
 let groupChatMemory = {};
@@ -221,7 +232,7 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null) {
         `• *pembuat agenda*: ${data.creator || 'tidak dikenal'} (${data.creatorJid || 'tidak ada nomor'})\n` +
         `• *waktu sasaran*: jam ${data.waktu || 'belum diset'} wib\n` +
         `• *target penerima*: ${targetText}\n` + // Menggunakan targetText yang benar bray
-        `• *skema alarm*: ${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai})\n` +
+        `• *skema alarm*: ${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)\n` +
         `• *template durasi (mundur)*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
         `• *template eksekusi (sekarang)*: "${data.pesanNow || `sekarang waktunya {judul} coy!`}"\n\n` +
         `📝 *sistem pengubah parameter diterima*:\n` +
@@ -229,7 +240,7 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null) {
         `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
 
     // Kirim menggunakan parameter jid yang valid sesuai deklarasi fungsi bray
-    await sock.sendMessage(jid, { text: confirmationText.toLowerCase() }, { quoted: quotedMsg });
+    await sock.sendMessage(jid, { text: confirmationText }, { quoted: quotedMsg });
 }
 
 function translateCronToHuman(cronPattern) {
@@ -294,7 +305,11 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
     if ((messageTemplate || '').startsWith('AI:')) {
         const { generateAIText } = require('./geminiClient');
         const { buildStyleInstruction } = require('./styleProfiler');
-        const tema = messageTemplate.replace('AI:', '').trim();
+        let tema = messageTemplate.replace('AI:', '').trim();
+        
+        // SUNTIKKAN ATURAN FORMAT KAPITALISASI KHUSUS SESUAI KEINGINAN LU YAN
+        tema += `\n\nAturan format tulisan: wajib gunakan huruf kecil semua (lowercase) untuk seluruh kalimat dan kata panggilan, KECUALI untuk singkatan teknis, istilah/definisi khusus yang jarang disebutkan, atau produk unpopular yang aslinya memang berupa kapital penuh (contoh: FIFO, LIFO). Jangan gunakan huruf kapital untuk nama orang atau di awal kalimat biasa bray.`;
+        
         const styleInstruction = buildStyleInstruction(jid);
         const aiRes = await generateAIText(tema, context, styleInstruction, manualFallback, formal);
         bodyText = aiRes.text;
@@ -443,15 +458,16 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
             await sock.sendPresenceUpdate('composing', memberJid);
             await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
             
-            const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinal.toLowerCase() });
+            // HAPUS .toLowerCase() DI SINI AGAR ISTILAH SEPERTI FIFO/LIFO TETAP AMAN KAPITAL BRAY!
+            const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinal });
             
             // Simpan id pesan terakhir ke database untuk pelacakan centang satu nanti
             if (reminder.teamTracking[memberJid]) {
                 reminder.teamTracking[memberJid].lastMsgId = sentMsg.key.id;
             }
 
-            // JEDA PENGAMAN ANTAR KEPALA NOMOR (Kunci utama penangkal blokir massal)
-            await new Promise(r => setTimeout(r, 4000 + Math.random() * 3000));
+            // JEDA PENGAMAN ANTAR KEPALA NOMOR KELOMPOK (Dibuat lebih lama dan acak biar natural bray)
+            await new Promise(r => setTimeout(r, 7000 + Math.random() * 5000));
         }
         
         saveConfig(config);
@@ -506,7 +522,7 @@ async function generateAndSendTeamReport(sock, reminder, config) {
         if (listPasif.length > 0) report += `*💤 silent reader (pasif):*\n${listPasif.join('\n')}\n\n`;
         if (listCentangSatu.length > 0) report += `*🚫 nomor tidak aktif (centang 1):*\n${listCentangSatu.join('\n')}\n\n`;
 
-        const teksFinalLaporan = report.trim().toLowerCase();
+        const teksFinalLaporan = report.trim();
         await sock.sendMessage(config.groupJid, { text: teksFinalLaporan });
 
         // ==========================================
@@ -537,8 +553,17 @@ async function generateAndSendTeamReport(sock, reminder, config) {
     }
 }
 
+// Tambahkan variabel penanda waktu bot mulai di luar fungsi (di bagian atas file bray)
+const botStartTime = Date.now();
+
 async function checkDeadlines(sock) {
     if (isCheckingDeadlines) return;
+    
+    // KATUP PENGAMAN: Jangan eksekusi jadwal apa pun dalam 30 detik pertama pasca-login bray!
+    if (Date.now() - botStartTime < 30 * 1000) {
+        return;
+    }
+
     isCheckingDeadlines = true;
 
     try {
@@ -550,6 +575,16 @@ async function checkDeadlines(sock) {
             if (reminder.type !== 'deadline') continue;
             if (!reminder.pendingAITexts) reminder.pendingAITexts = {};
 
+            // ====================================================================
+            // KATUP AUTO-CLEAN: JIKA TARGET UTAMA SUDAH LEWAT PAS BOT OFFLINE
+            // ====================================================================
+            if (Date.now() > reminder.targetTimestamp) {
+                idsToRemove.push(reminder.id);
+                changed = true;
+                console.log(`[auto-clean] menghapus senyap agenda "${reminder.judul}" karena sudah kedalwarsa pas bot offline bray.`);
+                continue; // Langsung lompat lewati pengiriman chat massal yan!
+            }
+            
             for (const milestone of reminder.milestones) {
                 const key = milestoneKey(milestone);
                 if (reminder.firedMilestones.includes(key)) continue;
@@ -789,60 +824,6 @@ async function startBot() {
         // SELESAI PENEMPELAN, SEKARANG LOGIKANYA AMAN DAN SINKRON BRAY
         // =================================================================
 
-        // =================================================================
-        // LALU TAROH KODE NOTULEN PASIF & AMNESIA NYA DI SINI BRAY!
-        // =================================================================
-        if (isGroup) {
-            if (!groupChatMemory[fromJid]) groupChatMemory[fromJid] = [];
-            
-            groupChatMemory[fromJid].push({
-                sender: currentNick,
-                text: text
-            });
-            
-            if (groupChatMemory[fromJid].length > 60) {
-                groupChatMemory[fromJid].shift();
-            }
-            
-            if (isBotMentioned) {
-                if (groupChatMemory[fromJid].length < 5) {
-                    const restartPrompt = `Lu adalah asisten kelompok kuliah yang santai. Server lu baru aja restart sehingga memori obrolan lokal lu kosong bersih dan lu ga tau topik apa yang lagi dibahas anak-anak sebelumnya. 
-                    Tugas lu: Berikan respon maaf kasual dengan gaya lu-gue, santai, huruf kecil semua, dan wajib menyelipkan vibes utama kalimat "gue gatau, servernya baru aja restart wkwk, jadi ga nyimak percakapan lo pada, sorry yaaa". Jangan beri penjelasan robot, langsung kalimat chat aslinya aja bray.`;
-                    
-                    const { generateAIText } = require('./geminiClient');
-                    const aiRestartRes = await generateAIText(restartPrompt, {}, '', 'gue gatau bray servernya baru aja restart wkwk jadi ga nyimak percakapan lo pada sorry yaaa', false);
-                    
-                    await sock.sendMessage(fromJid, { text: aiRestartRes.text.trim().toLowerCase() }, { quoted: msg });
-                    return;
-                }
-                
-                const transkripObrolan = groupChatMemory[fromJid].map(c => `[${c.sender}]: ${c.text}`).join('\n');
-                
-                const analisisGrupPrompt = `Lu adalah anggota kelompok kuliah yang cerdas, solutif, dan menyimak dinamika obrolan dari pojokan room chat grup. 
-                Hari ini lu dimintai pendapat atau solusi atas jalurnya obrolan kelompok.
-                
-                Berikut adalah transkrip obrolan terakhir di grup ini (dibaca berurutan dari atas ke bawah, chat paling bawah adalah yang paling baru saat ini):
-                ${transkripObrolan}
-                
-                Instruksi berpikir wajib:
-                1. Analisis apa topik yang paling hangat atau happening dibahas saat ini. Ingat aturan kronologis: meskipun topik lama punya 30 bubble obrolan di atas, kalau di 5 bubble paling bawah anak-anak sudah bergeser membahas hal baru, berarti fokus utama lu adalah topik baru yang 5 bubble tersebut bray.
-                2. Kenali siapa bicara apa secara detail. Sebutkan siapa pemilik statement A dan siapa pemilik statement B. Jika lu setuju dengan salah satu dari mereka, sebutkan kutipan atau intisari alasannya secara spesifik dan natural.
-                3. Berikan solusi, kesimpulan, atau jalan tengah yang cerdas, objektif, dan bisa diterima akal sehat sirkel kuliah lu.
-                4. Aturan penulisan wajib: gunakan huruf kecil semua (lowercase), gaya bahasa kasual tongkrongan santai lu-gue, jangan pakai format pointer atau simbol markdown list yang kaku, hilangkan identitas lu sebagai robot atau AI.
-                
-                Jawab langsung dengan teks balasan chat lu tanpa embel-embel penjelas bray.`;
-                
-                const { generateAIText } = require('./geminiClient');
-                const aiGroupRes = await generateAIText(analisisGrupPrompt, {}, '', 'sori bray otak gue lagi agak nge-lag, coba jelasin intinya aja', false);
-                
-                await sock.sendMessage(fromJid, { text: aiGroupRes.text.trim().toLowerCase() }, { quoted: msg });
-                return;
-            }
-        }
-        // =================================================================
-        // SELESAI PENEMPELAN, DI BAWAH INI ADALAH BLOK UTAMA LU YANG LAMA
-        // =================================================================
-
         if (fromJid === config.ownerJid) {
             if (isListLaporan) {
                 const arrRep = config.reports || [];
@@ -941,12 +922,13 @@ async function startBot() {
             }
             if (cmd.startsWith('/rangkuman')) {
                 const bubbleCount = parseInt(cmd.replace('/rangkuman', '').trim(), 10) || 200;
-                const logs = getGroupLogs(bubbleCount);
+                const logs = readGroupLogs(fromJid, bubbleCount); // Menggunakan database hibrida terpisah bray
                 if (logs.length === 0) {
-                    await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam bray' });
+                    await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam di database bray' });
                 } else {
                     await sock.sendMessage(fromJid, { text: 'bentar gue rangkumin dulu ya' });
-                    const summary = await summarizeChatLog(logs);
+                    const transkripObrolan = logs.map(c => `[${c.sender}]: ${c.text}`).join('\n');
+                    const summary = await summarizeChatLog(transkripObrolan);
                     await sock.sendMessage(fromJid, { text: summary });
                 }
                 return;
@@ -1014,7 +996,7 @@ async function startBot() {
 
                     // Kirim respon balik interogasi ke chat pribadi target
                     pushToMemory(fromJid, 'bot', aiResult.reply);
-                    await sock.sendMessage(fromJid, { text: aiResult.reply.toLowerCase() }, { quoted: msg });
+                    await sock.sendMessage(fromJid, { text: aiResult.reply }, { quoted: msg });
 
                     // JALUR OTOMATIS: Kirim ringkasan satu baris ke grup jika statusnya resmi menjadi Absen
                     if (aiResult.status === 'Absen' && !track.notifiedInGroup) {
@@ -1022,7 +1004,7 @@ async function startBot() {
                         saveConfig(config);
                         
                         const ringkasanGrup = `*[laporan absen awal]*\n${currentNick} resmi izin ga bisa ikut agenda *[${activeReminder.judul}]* karena *${aiResult.reason || 'ada urusan'}*.`;
-                        await sock.sendMessage(config.groupJid, { text: ringkasanGrup.toLowerCase() });
+                        await sock.sendMessage(config.groupJid, { text: ringkasanGrup });
                     }
 
                     return;
@@ -1032,6 +1014,36 @@ async function startBot() {
                     await sock.sendMessage(fromJid, { text: fallbackReply }, { quoted: msg });
                     return;
                 }
+            }
+        }
+
+        // ====================================================================
+        // KONDISI LOCK INTERAKTIF: PENANGKAP PILIHAN JADWAL KEDALWARSA BARU
+        // ====================================================================
+        if (userStates[fromJid] && userStates[fromJid].mode === 'past_time_check') {
+            if (isGroup && !isBotMentioned) {
+                // Biarkan lewat ke logger grup bawah bray
+            } else {
+                const state = userStates[fromJid];
+                
+                // JIKA USER PILIH DIGANTI BESOK HARI YAN
+                if (['besok', 'ubah besok', 'dirubah besok', 'lanjut', 'esok'].some(w => lowText.includes(w))) {
+                    // Alirkan statusnya ke draf konfirmasi utama bray
+                    setState(fromJid, 'confirm_schedule', state.data);
+                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                    return;
+                }
+                
+                // JIKA USER PILIH HAPUS ATAU SALAH KETIK
+                if (['hapus', 'salah ketik', 'batal', 'cancel', 'gajadi', 'delete', 'salah'].some(w => lowText.includes(w))) {
+                    resetState(fromJid);
+                    await sock.sendMessage(fromJid, { text: `oke siap bray, draf agenda buat "${state.data.judul || 'agenda kasual'}" resmi gue apus dari memori ya wkwk` }, { quoted: msg });
+                    return;
+                }
+                
+                // Katup pengaman kalau ketikan anak-anak di grup gak jelas maksudnya bray
+                await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, mau diganti buat *besok* atau draf agendanya mau gue *hapus* aja nih?` }, { quoted: msg });
+                return;
             }
         }
 
@@ -1239,11 +1251,33 @@ async function startBot() {
             const intentData = await parseIntentFromText(processingText);
 
             if (intentData.intent === 'create_schedule') {
-                // SUNTIKKAN IDENTITAS DALANG PEMBUAT AGENDA DI SINI YAN!
+                // SUNTIKKAN IDENTITAS DALANG PEMBUAT AGENDA
                 intentData.creator = currentNick;
                 intentData.creatorJid = senderJid.split('@')[0];
 
-                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1);
+                // GERBANG INTERAKTIF: CEK APAKAH WAKTU HARI INI SUDAH LEWAT YAN BRAY!
+                if (intentData.waktu && intentData.waktu.includes(':')) {
+                    const now = new Date();
+                    const tParts = getJakartaDateComponents(now);
+                    const [tHour, tMin] = intentData.waktu.split(':').map(Number);
+                    const checkTodayTarget = new Date(`${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}T${String(tHour).padStart(2, '0')}:${String(tMin).padStart(2, '0')}:00+07:00`);
+                    
+                    if (checkTodayTarget.getTime() <= now.getTime()) {
+                        // Kunci statusnya ke mode interogasi past_time_check bray
+                        setState(fromJid, 'past_time_check', intentData);
+                        
+                        const pastTimePrompt = `Lu adalah asisten kelompok kuliah yang santai. Seseorang bernama ${currentNick} baru saja membuat draf agenda "${intentData.judul}" buat jam ${intentData.waktu}, tapi jam segitu buat hari ini udah lewat bray.
+                        Tugas lu: Tanyakan dengan bahasa tongkrongan santai lu-gue, huruf kecil semua (lowercase), tanpa tanda kutip, tanpa markdown list kaku, intinya menyampaikan kalimat: "waktu agenda yg lo targetkan buat udah lewat, mau dirubah besok atau mau gue hapus karna lo salah ketik?". Jawab langsung kalimat chatnya aja tanpa penjelasan robot bray.`;
+                        
+                        const { generateAIText } = require('./geminiClient');
+                        const aiRes = await generateAIText(pastTimePrompt, {}, '', 'waktu agenda yg lo targetkan buat udah lewat, mau dirubah besok atau mau gue hapus karna lo salah ketik?', false);
+                        
+                        await sock.sendMessage(fromJid, { text: aiRes.text.trim().toLowerCase() }, { quoted: msg });
+                        return;
+                    }
+                }
+
+                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1); //
 
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
@@ -1257,12 +1291,13 @@ async function startBot() {
                 await sendDetailedConfirmation(sock, fromJid, intentData, msg);
             
             } else if (intentData.intent === 'summarize') {
-                const logs = getGroupLogs(intentData.jumlahChat || 200);
+                const logs = readGroupLogs(fromJid, intentData.jumlahChat || 200); // Menggunakan database hibrida terpisah bray
                 if (logs.length === 0) {
                     await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam nih coy' });
                 } else {
                     await sock.sendMessage(fromJid, { text: 'bentar gue rangkumin dulu ya' });
-                    const summary = await summarizeChatLog(logs);
+                    const transkripObrolan = logs.map(c => `[${c.sender}]: ${c.text}`).join('\n');
+                    const summary = await summarizeChatLog(transkripObrolan);
                     await sock.sendMessage(fromJid, { text: summary });
                 }
                 
@@ -1336,7 +1371,7 @@ async function startBot() {
                 }
 
                 pushToMemory(fromJid, 'bot', pesanBalasanFinal);
-                await sock.sendMessage(fromJid, { text: pesanBalasanFinal.toLowerCase() }, { quoted: msg });
+                await sock.sendMessage(fromJid, { text: pesanBalasanFinal }, { quoted: msg });
             }
         }
         
