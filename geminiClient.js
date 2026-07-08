@@ -170,12 +170,12 @@ pilihan intent:
 1. "create_schedule": jika pengguna ingin membuat jadwal atau reminder atau deadline DAN menyebutkan jam serta judul aktivitas.
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
-ekstraksi rincian interval waktu pengingat secara cerdas jika disebutkan di chat, misal tiap menit diartikan intervalMinutes: 1, per-2 menit diartikan intervalMinutes: 2. 
-
-pembagian parameter pesan:
-- jika user menyebutkan template pesan pengingat mundur/durasi (misal: "pake AI:ingetin maki-maki"), masukkan ke parameter pesanDurasi.
-- jika user menyebutkan template pengingat pas waktu target eksekusi (H-0) (misal: "pesan sekarangnya ketik dor"), masukkan ke parameter pesanNow.
-- jika hanya menyebutkan isi pesan biasa tanpa spesifikasi, masukkan secara default ke pesanDurasi.
+aturan ekstraksi parameter untuk "create_schedule":
+- jika user menyebutkan rentetan menit pengingat spesifik (misal: "pengingat di 30 menit, 20 menit, 10 menit, 5 menit, dan 3 menit, dan 1 menit terakhir"), ambil seluruh angka menit tersebut, susun menjadi array/larik angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
+- jika tidak ada rentetan menit spesifik melainkan kata perulangan rutin (misal: "tiap menit", "per-5 menit"), isi properti "intervalMinutes" dengan angka menit tersebut dan buat "customMilestones" menjadi null.
+- jika user menyebutkan kata pembatalan laporan (misal: "tanpa laporan", "matikan laporan", "laporan off"), set properti "withReport" menjadi false. jika tidak disebutkan atau diminta aktif, secara default beri nilai true.
+- jika user menyebutkan template pesan pengingat mundur/durasi, masukkan ke parameter pesanDurasi.
+- jika user menyebutkan template pengingat pas waktu target eksekusi (H-0), masukkan ke parameter pesanNow.
 - jika ada nama orang yang dituju masukkan ke extractedTarget.
 
 format output json murni:
@@ -184,6 +184,8 @@ format output json murni:
   "judul": "string atau null",
   "waktu": "string format HH:MM atau null",
   "intervalMinutes": number atau null,
+  "customMilestones": array angka atau null,
+  "withReport": boolean,
   "startTime": "string format HH:MM atau null",
   "pesanDurasi": "string atau null",
   "pesanNow": "string atau null",
@@ -201,7 +203,10 @@ format output json murni:
     if (!result.text) return { intent: 'chat' };
     
     try {
-        return JSON.parse(result.text.replace(/```json|```/gi, '').trim());
+        const cleanJsonStr = result.text.replace(/```json|```/gi, '').trim();
+        // DEBUGGING LOG LOCAL: Cetak mentahan payload JSON keluaran Gemini bray
+        console.log('📋 [DEBUG INTENT AI OUT]:', cleanJsonStr);
+        return JSON.parse(cleanJsonStr);
     } catch (err) {
         console.error('gagal urai json intent:', err.message);
         return { intent: 'chat' };

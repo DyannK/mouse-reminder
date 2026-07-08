@@ -297,12 +297,32 @@ async function handleListDetail(sock, fromJid) {
             msg += `• milestones:\n`;
             r.milestones.forEach(m => {
                 let labelTeksFinal = m.label;
-                // KATUP STRATEGIS: Hitung ulang secara realtime biar data lama otomatis ikutan rapi bray
+                
                 if (r.targetTimestamp && m.totalMinutes !== undefined) {
                     const waktuAlarmMs = r.targetTimestamp - (m.totalMinutes * 60 * 1000);
                     const komponenJam = getJakartaDateComponents(new Date(waktuAlarmMs));
                     const teksJamMenit = `${String(komponenJam.hour).padStart(2, '0')}:${String(komponenJam.minute).padStart(2, '0')} WIB`;
-                    labelTeksFinal = m.totalMinutes === 0 ? `agenda dimulai jam [${teksJamMenit}]` : `pengingat ${m.totalMinutes} menit di jam [${teksJamMenit}]`;
+                    
+                    const mKey = milestoneKey(m);
+                    const sudahKirim = r.firedMilestones && r.firedMilestones.includes(mKey);
+                    const kenaMiss = r.missedMilestones && r.missedMilestones.includes(mKey); // Lacak ranjau offline bray
+                    
+                    let emojiStatus = '⏳';
+                    let teksStatus = '(menunggu waktu)';
+                    
+                    if (kenaMiss) {
+                        emojiStatus = '❌';
+                        teksStatus = '(gagal/server down)';
+                    } else if (sudahKirim) {
+                        emojiStatus = '✅';
+                        teksStatus = '(terkirim)';
+                    }
+                    
+                    if (m.totalMinutes === 0) {
+                        labelTeksFinal = `${emojiStatus} [${teksJamMenit}] agenda dimulai ${teksStatus}`;
+                    } else {
+                        labelTeksFinal = `${emojiStatus} [${teksJamMenit}] pengingat ${m.totalMinutes} menit ${teksStatus}`;
+                    }
                 }
                 msg += `  - ${labelTeksFinal}\n`;
             });
@@ -517,6 +537,7 @@ async function generateAndSendTeamReport(sock, reminder, config) {
         let listNgilang = [];
         let listPasif = [];
         let listCentangSatu = [];
+        let listGagalServer = []; // Wadah baru khusus menampung korban server down bray
 
         for (const member of members) {
             const jid = member.id;
@@ -528,6 +549,9 @@ async function generateAndSendTeamReport(sock, reminder, config) {
             const namaOrang = config.accountMapping?.[jid] || (jid === config.ownerJid ? 'pemilik' : jid.split('@')[0]);
             const track = reminder.teamTracking?.[jid] || { status: 'Belum Respon', reason: '', isDelivered: true };
 
+            // CEK APAKAH AGENDA INI PUNYA REKAM JEJAK MISSED MILESTONES SEBELUMNYA BRAY
+            const apakahAdaMissed = reminder.missedMilestones && reminder.missedMilestones.length > 0;
+
             if (track.status === 'Hadir') {
                 listHadir.push(`- ${namaOrang} (respon: ${track.message || 'bisa'})`);
             } else if (track.status === 'Absen') {
@@ -535,7 +559,10 @@ async function generateAndSendTeamReport(sock, reminder, config) {
             } else if (track.status === 'Abu-Abu') {
                 listNgilang.push(`- ${namaOrang} (awal sempet bilang: ${track.reason || 'gatau'}, abis itu ngilang)`);
             } else {
-                if (track.isDelivered === false) {
+                // JIKA STATUSNYA BELUM RESPON, TAPI SEBENARNYA SERVER SEMPAT MATI DI AWAL YAN
+                if (apakahAdaMissed && track.interrogationStage === 0) {
+                    listGagalServer.push(`- ${namaOrang} (gagal terabsen / server sempat down bray)`);
+                } else if (track.isDelivered === false) {
                     listCentangSatu.push(`- ${namaOrang} (nomor ga aktif / centang 1)`);
                 } else {
                     listPasif.push(`- ${namaOrang} (silent reader / menyimak)`);
@@ -545,6 +572,7 @@ async function generateAndSendTeamReport(sock, reminder, config) {
 
         if (listHadir.length > 0) report += `*✅ anggota hadir/aktif:*\n${listHadir.join('\n')}\n\n`;
         if (listAbsen.length > 0) report += `*❌ anggota izin/absen:*\n${listAbsen.join('\n')}\n\n`;
+        if (listGagalServer.length > 0) report += `*⚠️ tidak sempat terinterogasi (sistem down):*\n${listGagalServer.join('\n')}\n\n`;
         if (listNgilang.length > 0) report += `*⚠️ tidak konsisten (ngilang):*\n${listNgilang.join('\n')}\n\n`;
         if (listPasif.length > 0) report += `*💤 silent reader (pasif):*\n${listPasif.join('\n')}\n\n`;
         if (listCentangSatu.length > 0) report += `*🚫 nomor tidak aktif (centang 1):*\n${listCentangSatu.join('\n')}\n\n`;
@@ -599,6 +627,7 @@ async function checkDeadlines(sock) {
         for (const reminder of config.reminders) {
             if (reminder.type !== 'deadline') continue;
             if (!reminder.pendingAITexts) reminder.pendingAITexts = {};
+            if (!reminder.missedMilestones) reminder.missedMilestones = []; // Wadah baru pengunci silang merah yan
 
             // ====================================================================
             // KATUP AUTO-CLEAN: JIKA TARGET UTAMA SUDAH LEWAT PAS BOT OFFLINE
@@ -607,9 +636,12 @@ async function checkDeadlines(sock) {
                 idsToRemove.push(reminder.id);
                 changed = true;
                 console.log(`[auto-clean] menghapus senyap agenda "${reminder.judul}" karena sudah kedalwarsa pas bot offline bray.`);
-                continue; // Langsung lompat lewati pengiriman chat massal yan!
+                continue; 
             }
             
+            let missedMilestonesThisRun = [];
+            let normalMilestonesThisRun = [];
+
             for (const milestone of reminder.milestones) {
                 const key = milestoneKey(milestone);
                 if (reminder.firedMilestones.includes(key)) continue;
@@ -617,41 +649,97 @@ async function checkDeadlines(sock) {
                 const triggerTs = computeTriggerTimestamp(milestone, reminder.targetTimestamp);
 
                 if (Date.now() >= triggerTs) {
-                    // SAKLAR PELACAKAN WAJIB AKTIF DAN SCOPE HARUS COCOK BRAY
-                    if ((reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withTracking !== false) {
-                        await handleGroupTeamDistribution(sock, reminder, milestone, config);
+                    // Jika selisih waktu sudah lewat lebih dari 1 menit, artinya bot sempet mati bray
+                    if (Date.now() - triggerTs >= 60 * 1000) {
+                        missedMilestonesThisRun.push(milestone);
+                    } else {
+                        normalMilestonesThisRun.push(milestone);
                     }
-                    
-                    // SAKLAR LAPORAN SEKARANG IKUT MENJADI KATUP PENYARING UTAMA YAN
-                    if (milestone.isAuto && (reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withReport !== false) {
-                        setTimeout(async () => {
-                            const freshConfig = loadConfig();
-                            const freshReminder = freshConfig.reminders.find(r => r.id === reminder.id) || reminder;
-                            await generateAndSendTeamReport(sock, freshReminder, freshConfig);
-                        }, 5 * 60 * 1000);
-                    }
-                    
-                    const targetJids = (reminder.targets || ['group']).map(t => {
-                        if (t === 'group') return config.groupJid;
-                        if (t === 'personal') return config.ownerJid;
-                        return t;
-                    }).filter(Boolean);
-
-                    const targetTextMap = {};
-                    const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
-                    const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
-                    const manualFallback = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
-
-                    for (const jid of targetJids) {
-                        const preGen = reminder.pendingAITexts[key]?.textsByJid?.[jid];
-                        targetTextMap[jid] = preGen || (await resolveTemplateForJid(messageTemplate, manualFallback, jid, context, reminder.formal)).text;
-                    }
-
-                    await deliverToJids(sock, reminder, targetTextMap);
-                    reminder.firedMilestones.push(key);
-                    delete reminder.pendingAITexts[key];
-                    changed = true;
                 }
+            }
+
+            // ====================================================================
+            // JALUR A: EKSEKUSI RECOVERY ALARM YANG MISSED (KONSOLIDASI SATU NYAWA)
+            // ====================================================================
+            if (missedMilestonesThisRun.length > 0) {
+                let jamMissedArr = missedMilestonesThisRun.map(m => {
+                    const waktuAlarmMs = reminder.targetTimestamp - (m.totalMinutes * 60 * 1000);
+                    const komponenJam = getJakartaDateComponents(new Date(waktuAlarmMs));
+                    return `${String(komponenJam.hour).padStart(2, '0')}:${String(komponenJam.minute).padStart(2, '0')} WIB`;
+                });
+
+                const jamSekarang = new Date();
+                const komponenSekarang = getJakartaDateComponents(jamSekarang);
+                const teksSekarang = `${String(komponenSekarang.hour).padStart(2, '0')}:${String(komponenSekarang.minute).padStart(2, '0')} WIB`;
+
+                let recoveryText = `⚠️ *[BACKEND RECOVERY NOTICE]*\n` +
+                                   `mau ngingetin bray, sorry seharusnya gue ngingetin lo jam ${jamMissedArr.join(', dan ')}, karena server di belakang gue sempet mati jadi gue baru hidup lagi dan malah baru ngingetin lo di jam ${teksSekarang}.\n\n` +
+                                   `• *agenda*: ${reminder.judul}`;
+
+                // Kunci seluruh milestones yang missed ke database fired dan missed bray
+                missedMilestonesThisRun.forEach(m => {
+                    const key = milestoneKey(m);
+                    if (!reminder.firedMilestones.includes(key)) reminder.firedMilestones.push(key);
+                    if (!reminder.missedMilestones.includes(key)) reminder.missedMilestones.push(key);
+                });
+                changed = true;
+
+                const targetJids = (reminder.targets || ['group']).map(t => {
+                    if (t === 'group') return config.groupJid;
+                    if (t === 'personal') return config.ownerJid;
+                    return t;
+                }).filter(Boolean);
+
+                const targetTextMap = {};
+                targetJids.forEach(jid => { targetTextMap[jid] = recoveryText; });
+
+                // Kirim notifikasi penjelasan ke grup/personal target bray
+                await deliverToJids(sock, reminder, targetTextMap);
+
+                // KATUP NAGIH UTANG PELACAKAN KELOMPOK: Jika di daftar miss ada skema tracking bray
+                if ((reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withTracking !== false) {
+                    const milestoneTerakhir = missedMilestonesThisRun[missedMilestonesThisRun.length - 1];
+                    await handleGroupTeamDistribution(sock, reminder, milestoneTerakhir, config);
+                }
+            }
+
+            // ====================================================================
+            // JALUR B: EKSEKUSI JALUR ALARM NORMAL (ON-TIME BERJALAN SEPERTI BIASA)
+            // ====================================================================
+            for (const milestone of normalMilestonesThisRun) {
+                const key = milestoneKey(milestone);
+
+                if ((reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withTracking !== false) {
+                    await handleGroupTeamDistribution(sock, reminder, milestone, config);
+                }
+                
+                if (milestone.isAuto && (reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withReport !== false) {
+                    setTimeout(async () => {
+                        const freshConfig = loadConfig();
+                        const freshReminder = freshConfig.reminders.find(r => r.id === reminder.id) || reminder;
+                        await generateAndSendTeamReport(sock, freshReminder, freshConfig);
+                    }, 5 * 60 * 1000);
+                }
+                
+                const targetJids = (reminder.targets || ['group']).map(t => {
+                    if (t === 'group') return config.groupJid;
+                    if (t === 'personal') return config.ownerJid;
+                    return t;
+                }).filter(Boolean);
+
+                const targetTextMap = {};
+                const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
+                const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
+                const manualFallback = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
+
+                for (const jid of targetJids) {
+                    const preGen = reminder.pendingAITexts[key]?.textsByJid?.[jid];
+                    targetTextMap[jid] = preGen || (await resolveTemplateForJid(messageTemplate, manualFallback, jid, context, reminder.formal)).text;
+                }
+
+                await deliverToJids(sock, reminder, targetTextMap);
+                reminder.firedMilestones.push(key);
+                changed = true;
             }
 
             if (reminder.firedMilestones.length >= reminder.milestones.length) {
@@ -661,8 +749,7 @@ async function checkDeadlines(sock) {
 
         if (idsToRemove.length > 0) {
             for (const id of idsToRemove) {
-                const idx = config.reminders.findIndex(r => r.id === id);
-                if (idx !== -1) config.reminders.splice(idx, 1);
+                const idx = config.reminders.splice(config.reminders.findIndex(r => r.id === id), 1);
             }
             changed = true;
         }
@@ -1533,7 +1620,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
 
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
-                    const reply = await generateDynamicStateText(`ini yakin gue ngingetin ${calculated.length} kali gempor gue gila bray peladen bisa meledak coba benerin lagi maksud lu gimana mau diganti tiap berapa menit`, currentNick, samples, chatMemory[fromJid] || []);
+                    const reply = await generateDynamicStateText(`ini yakin gue ngingetin ${calculated.length} kali gempor gue gila bray server bisa meledak coba benerin lagi maksud lu gimana mau diganti tiap berapa menit`, currentNick, samples, chatMemory[fromJid] || []);
                     pushToMemory(fromJid, 'bot', reply);
                     await sock.sendMessage(fromJid, { text: reply });
                     return;
