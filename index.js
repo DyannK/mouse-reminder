@@ -285,7 +285,20 @@ async function handleListDetail(sock, fromJid) {
     reminders.forEach((r, idx) => {
         msg += `*${idx + 1}. [${r.judul}]* (ID: ${r.id})\n`;
         msg += `• tipe: ${r.type}\n`;
-        msg += `• scope: ${r.scope}\n`;
+        
+        // FORMAT BARU: Kupas tuntas JID menjadi nomor telepon biasa tanpa embel-embel teks belakang bray
+        if (r.targets && r.targets.length > 0) {
+            const listTargetBersih = r.targets.map(t => {
+                if (t === 'group') return 'grup kuliah';
+                const nomorMurni = t.split('@')[0];
+                const namaKamus = config.accountMapping?.[t] || '';
+                return namaKamus ? `${namaKamus} (${nomorMurni})` : nomorMurni;
+            }).join(', ');
+            msg += `• target penerima: ${listTargetBersih}\n`;
+        } else {
+            msg += `• scope: ${r.scope}\n`;
+        }
+
         if (r.targetTimestamp) {
             const d = new Date(r.targetTimestamp);
             msg += `• waktu: ${d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} wib\n`;
@@ -305,7 +318,7 @@ async function handleListDetail(sock, fromJid) {
                     
                     const mKey = milestoneKey(m);
                     const sudahKirim = r.firedMilestones && r.firedMilestones.includes(mKey);
-                    const kenaMiss = r.missedMilestones && r.missedMilestones.includes(mKey); // Lacak ranjau offline bray
+                    const kenaMiss = r.missedMilestones && r.missedMilestones.includes(mKey);
                     
                     let emojiStatus = '⏳';
                     let teksStatus = '(menunggu waktu)';
@@ -1302,23 +1315,54 @@ async function startBot() {
             } else {
                 const state = userStates[fromJid];
                 
-                // JIKA USER PILIH DIGANTI BESOK HARI YAN
-                if (['besok', 'ubah besok', 'dirubah besok', 'lanjut', 'esok'].some(w => lowText.includes(w))) {
-                    // Alirkan statusnya ke draf konfirmasi utama bray
-                    setState(fromJid, 'confirm_schedule', state.data);
-                    await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                    return;
+                const promptRevisiWaktuLampau = `Kamu adalah mesin pembaca keputusan koreksi agenda kuliah kadaluwarsa.
+Data draf saat ini: ${JSON.stringify(state.data)}
+User membalas dengan ketikan bebas: "${text}"
+
+Tugas kamu adalah menentukan niat perkataan user ke dalam salah satu keputusan JSON murni:
+1. "besok": Jika user ingin menjadwalkan agenda ini untuk esok hari di jam yang sama (seperti: "besok aja", "ubah besok", "dirubah besok", "esok").
+2. "hapus": Jika user ingin membatalkan draf karena salah ketik atau emang ga jadi (seperti: "hapus", "batal", "cancel", "gajadi").
+3. "edit": Jika user ingin merevisi atau mengganti jamnya ke waktu baru hari ini yang belum lewat (seperti: "rubah jadi jam 23:59 hari ini", "ganti waktu dong jadi jam 23:10"). Ambil angka jam menit digitalnya dan taruh di properti "waktu_baru" format HH:MM.
+
+Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
+{
+  "keputusan": "besok" | "hapus" | "edit",
+  "waktu_baru": string atau null
+}`;
+
+                try {
+                    const { generateAIText } = require('./geminiClient');
+                    const aiRes = await generateAIText(promptRevisiWaktuLampau, {}, '', '{}', false);
+                    const cleanJsonStr = aiRes.text.replace(/```json|```/gi, '').trim();
+                    const ptResult = JSON.parse(cleanJsonStr);
+
+                    if (ptResult.keputusan === 'besok') {
+                        setState(fromJid, 'confirm_schedule', state.data);
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+                    
+                    if (ptResult.keputusan === 'hapus') {
+                        resetState(fromJid);
+                        await sock.sendMessage(fromJid, { text: `oke siap bray, draf agenda buat "${state.data.judul || 'agenda kasual'}" resmi gue apus dari memori ya wkwk` }, { quoted: msg });
+                        return;
+                    }
+                    
+                    if (ptResult.keputusan === 'edit' && ptResult.waktu_baru) {
+                        state.data.waktu = ptResult.waktu_baru;
+                        // Alirkan status draf langsung maju ke gerbang konfirmasi utama bray!
+                        setState(fromJid, 'confirm_schedule', state.data);
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+
+                    // Katup pengaman jika teks AI tidak stabil bray
+                    await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, mau diganti buat *besok*, diubah jamnya ke waktu baru hari ini, atau draf agendanya mau gue *hapus* aja nih?` }, { quoted: msg });
+
+                } catch (err) {
+                    console.error('gagal urai keputusan past_time_check:', err.message);
+                    await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, draf agenda "${state.data.judul}" mau diganti besok atau dihapus aja?` }, { quoted: msg });
                 }
-                
-                // JIKA USER PILIH HAPUS ATAU SALAH KETIK
-                if (['hapus', 'salah ketik', 'batal', 'cancel', 'gajadi', 'delete', 'salah'].some(w => lowText.includes(w))) {
-                    resetState(fromJid);
-                    await sock.sendMessage(fromJid, { text: `oke siap bray, draf agenda buat "${state.data.judul || 'agenda kasual'}" resmi gue apus dari memori ya wkwk` }, { quoted: msg });
-                    return;
-                }
-                
-                // Katup pengaman kalau ketikan anak-anak di grup gak jelas maksudnya bray
-                await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, mau diganti buat *besok* atau draf agendanya mau gue *hapus* aja nih?` }, { quoted: msg });
                 return;
             }
         }
@@ -1367,19 +1411,35 @@ async function startBot() {
                     const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
                     
                     if (isYes) {
-                        const data = state.data;
-                        let targetTimestamp = Date.now();
+                        // SENSOR TARGET PENGIRIM DINAMIS DI LAPIS 2
+                        let targetJidsFinal = [fromJid];
+                        let finalScope = isGroup ? 'group' : 'personal';
                         
-                        if (data.waktu && data.waktu.includes(':')) {
-                            const [hour, minute] = data.waktu.split(':').map(Number);
-                            const now = new Date();
-                            const tParts = getJakartaDateComponents(now);
+                        if (data.extractedTarget) {
+                            const cleanTargetStr = data.extractedTarget.toLowerCase();
+                            let mappedJids = [];
                             
-                            let targetDate = new Date(`${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`);
-                            if (targetDate.getTime() <= now.getTime()) {
-                                targetDate.setDate(targetDate.getDate() + 1);
+                            if (cleanTargetStr === 'sender') {
+                                mappedJids.push(senderJid);
+                            } else {
+                                Object.entries(config.accountMapping || {}).forEach(([jid, name]) => {
+                                    if (cleanTargetStr.includes(name.toLowerCase())) {
+                                        mappedJids.push(jid);
+                                    }
+                                });
                             }
-                            targetTimestamp = targetDate.getTime();
+
+                            if (mappedJids.length > 0) {
+                                targetJidsFinal = mappedJids;
+                                // Jika dikirim ke nomor dirinya sendiri secara personal, scope diubah jadi personal bray
+                                finalScope = mappedJids[0] === senderJid && mappedJids.length === 1 ? 'personal' : 'tertarget'; 
+                            } else {
+                                const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
+                                if (foundContact) {
+                                    targetJidsFinal = [foundContact.jid];
+                                    finalScope = 'personal';
+                                }
+                            }
                         }
 
                         const intervalVal = data.intervalMinutes || 1;
@@ -1444,21 +1504,26 @@ async function startBot() {
                     }
 
                     // ====================================================================
-                    // LAPIS 3: JALUR CERDAS INTERPRETASI KETIKAN KASUAL MANUSIA (AI BASIS)
+                    // LAPIS 3: JALUR CERDAS INTERPRETASI KETIKAN KASUAL MANUSIA (AI BASIS SEMESTA)
                     // ====================================================================
                     const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
 Data draf saat ini: ${JSON.stringify(state.data)}
 User membalas dengan ketikan bebas: "${text}"
 
 Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentuk JSON objek murni untuk menentukan tipe keputusan:
-1. "batal": Jika user menggunakan kalimat pembatalan kasual/kaku (seperti: "ga jadi deh", "batalin aja", "gajadi", "cancel", "ntar aja dah pusing"). Kalimat balasan berupa penutupan lowercase ramah.
-2. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, atau memberikan skema alarm pengingat kustom baru).
-3. "chat": Jika ketikan user di luar konteks pembatalan atau perbaikan draf (hanya basa-basi santai). Kalimat balasan berupa ketikan santai tongkrongan lowercase.
+1. "batal": Jika user menggunakan kalimat pembatalan kasual/kaku. Kalimat balasan berupa penutupan lowercase ramah.
+2. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, skema alarm kustom, template pesan durasi, maupun template pesan sekarang).
 
 Aturan pengubahan parameter objek jika keputusan bernilai "edit":
-- Jika user meminta alarm/pengingat di menit-menit tertentu (misal: di 30 menit, 20 menit, 10 menit, 5 menit, 3 menit, dan 1 menit terakhir), ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
-- Jika user mengubah judul, isi properti "judul" dengan nama agenda baru yang bersih dari kata sampah pengetikan (seperti "ganti", "deh", "jadi", "judulnya").
+- Jika user meminta alarm/pengingat di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
+- Jika user mengubah judul, isi properti "judul" dengan nama agenda baru.
 - Jika user mengubah jam/waktu, isi properti "waktu" dengan format HH:MM digital.
+- Jika user mengubah template pesan durasi (pesan reminder mundur), masukkan teks kalimat barunya ke properti "pesanDurasi".
+- Jika user mengubah template pesan sekarang (pesan waktu eksekusi H-0), masukkan teks kalimat barunya ke properti "pesanNow".
+- Jika user meminta pembatalan/menyalakan laporan kelompok, set properti "withReport" dengan nilai boolean yang sesuai.
+- Jika user meminta mengaktifkan/mematikan pelacakan keaktifan PM, set properti "withTracking" dengan nilai boolean yang sesuai.
+- Jika user meminta target penerima diubah ke dirinya sendiri (seperti: "nomor gue aja", "buat gua"), isi properti "extractedTarget" dengan string murni "sender". Jika merujuk ke nama orang lain, masukkan nama orang tersebut.
+- KHUSUS KOREKSI DATABASE KONTAK: Jika user memerintahkan pembaruan database nomor hp (seperti: "buat dyan tapi nomornya yang ini 628xxx", "sekalian update nomor fizar jadi..."), tangkap data tersebut dan masukkan ke dalam properti objek "update_database_kontak" dengan sub-properti "nama" dan "nomor".
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
@@ -1467,7 +1532,16 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
     "judul": string atau null,
     "waktu": string atau null,
     "customMilestones": array atau null,
-    "intervalMinutes": number atau null
+    "intervalMinutes": number atau null,
+    "pesanDurasi": string atau null,
+    "pesanNow": stringTemplate atau null,
+    "withReport": boolean atau null,
+    "withTracking": boolean atau null,
+    "extractedTarget": string atau null
+  },
+  "update_database_kontak": {
+    "nama": string or null,
+    "nomor": string or null
   },
   "balasan_chatan": string atau null
 }`;
@@ -1486,6 +1560,26 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         }
 
                         if (updateResult.keputusan === 'edit') {
+                            // A. EKSEKUSI OPERASI PERMANEN: AMANKAN REVISI DATABASE KONTAK DI LUAR MEMORI JADWAL
+                            if (updateResult.update_database_kontak) {
+                                const dbKontak = updateResult.update_database_kontak;
+                                if (dbKontak.nama && dbKontak.nomor) {
+                                    const cleanNumOnly = dbKontak.nomor.replace(/[^0-9]/g, '');
+                                    
+                                    // KATUP PENGAMAN HAK AKSES: Wajib Owner, atau orang tersebut sedang mengubah nomor HP-nya sendiri yan!
+                                    const isSelfChanging = senderJid.startsWith(cleanNumOnly);
+                                    if (fromJid === config.ownerJid || isSelfChanging) {
+                                        const formattedJidTarget = `${cleanNumOnly}@s.whatsapp.net`;
+                                        config.accountMapping[formattedJidTarget] = dbKontak.nama.toLowerCase();
+                                        saveConfig(config);
+                                        console.log(`[database] sukses update kontak via draf kasual: ${dbKontak.nama} -> ${cleanNumOnly}`);
+                                    } else {
+                                        await sock.sendMessage(fromJid, { text: `gagal update nomor orang lain bray, hak akses database kontak dikunci khusus owner sirkel kuliah.` }, { quoted: msg });
+                                    }
+                                }
+                            }
+
+                            // B. EKSEKUSI OPERASI RAM JADWAL SEPERTI BIASA
                             const params = updateResult.parameter_berubah || {};
                             Object.keys(params).forEach(key => {
                                 if (params[key] !== undefined && params[key] !== null) {
@@ -1505,7 +1599,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         }
 
                     } catch (err) {
-                        console.error('gagal parsing keputusan draf AI:', err.message);
+                        console.error('gagal parsing keputusan draf AI universal:', err.message);
                         await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, draf agenda "${state.data.judul}" mau lu simpen (ketik iya), lu edit parameter, atau mau dibatalin nih?` }, { quoted: msg });
                     }
                 }

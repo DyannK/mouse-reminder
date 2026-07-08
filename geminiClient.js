@@ -171,12 +171,13 @@ pilihan intent:
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
 aturan ekstraksi parameter untuk "create_schedule":
-- jika user menyebutkan rentetan menit pengingat spesifik (misal: "pengingat di 30 menit, 20 menit, 10 menit, 5 menit, dan 3 menit, dan 1 menit terakhir"), ambil seluruh angka menit tersebut, susun menjadi array/larik angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
+- jika user menyebutkan rentetan menit pengingat spesifik (misal: "pengingat di 30 menit, 20 menit, 10 menit..."), ambil seluruh angka menit tersebut, susun menjadi array/larik angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
 - jika tidak ada rentetan menit spesifik melainkan kata perulangan rutin (misal: "tiap menit", "per-5 menit"), isi properti "intervalMinutes" dengan angka menit tersebut dan buat "customMilestones" menjadi null.
-- jika user menyebutkan kata pembatalan laporan (misal: "tanpa laporan", "matikan laporan", "laporan off"), set properti "withReport" menjadi false. jika tidak disebutkan atau diminta aktif, secara default beri nilai true.
+- jika user menyebutkan kata pembatalan laporan (misal: "tanpa laporan", "matikan laporan", "laporan off"), set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
+- jika user merujuk ke diri sendiri atau penegasan personal (misal: "buat gue pribadi", "buat saya", "buat gua aja", "pribadi aja"), kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". jangan diisi dengan nama kata ganti tersebut.
+- jika merujuk ke nama kontak atau nama orang lain (misal: "buat dyan", "buat fizar"), baru isi properti "extractedTarget" dengan nama orang tersebut.
 - jika user menyebutkan template pesan pengingat mundur/durasi, masukkan ke parameter pesanDurasi.
 - jika user menyebutkan template pengingat pas waktu target eksekusi (H-0), masukkan ke parameter pesanNow.
-- jika ada nama orang yang dituju masukkan ke extractedTarget.
 
 format output json murni:
 {
@@ -204,7 +205,6 @@ format output json murni:
     
     try {
         const cleanJsonStr = result.text.replace(/```json|```/gi, '').trim();
-        // DEBUGGING LOG LOCAL: Cetak mentahan payload JSON keluaran Gemini bray
         console.log('📋 [DEBUG INTENT AI OUT]:', cleanJsonStr);
         return JSON.parse(cleanJsonStr);
     } catch (err) {
