@@ -874,7 +874,7 @@ async function startBot() {
                     listTeks += `${i + 1}. *[${r.judul}]*\n• id arsip: ${r.id}\n• tanggal: ${r.tanggal}\n-------------------------\n`;
                 });
                 listTeks += `\n_ketik *detail laporan [id]* atau */detaillaporan [id]* buat bongkar isi detail laporannya bray._`;
-                await sock.sendMessage(fromJid, { text: listTeks.toLowerCase() }, { quoted: msg });
+                await sock.sendMessage(fromJid, { text: listTeks }, { quoted: msg });
                 return;
             }
 
@@ -931,31 +931,34 @@ async function startBot() {
                     `Sistem ini dirancang buat jagain agenda personal sekaligus mantau keaktifan anggota kelompok kuliah secara otomatis bray. Berikut adalah daftar perintah yang bisa lu gunain:\n\n` +
                     `📌 *1. PENGELOLAAN AGENDA RUTIN BERULANG*\n` +
                     `Perintah ini digunain buat bikin alarm pengingat yang bakal bunyi terus secara konsisten mengikuti pola waktu tertentu bray.\n` +
-                    `• *Format*: \`/tambah [menit] [jam] [tanggal] [bulan] [hari] | [pesan pengingat]\`\n` +
-                    `• *Contoh*: \`/tambah 0 7 * * * | bangun bray kuliah elka malem\`\n` +
-                    `_(Catatan: Tanda bintang artinya berjalan setiap waktu tanpa batas)_\n\n` +
+                    `• *Cara Kasual*: Bicara santai lewat chat, misal: "bot buatin jadwal rutin jam 07:00 buat kuliah elka"\n` +
+                    `• *Cara Kaku*: \`/tambah [menit] [jam] [tanggal] [bulan] [hari] | [pesan pengingat]\`\n` +
+                    `• *Contoh*: \`/tambah 0 7 * * * | bangun bray kuliah elka malem\`\n\n` +
                     `📌 *2. PENGELOLAAN TENGGAT WAKTU TUGAS KULIAH*\n` +
                     `Perintah ini dipake buat bikin target satu kali eksekusi tugas kelompok yang butuh hitung mundur dinamis bray.\n` +
-                    `• *Format*: \`/tambahdeadline [tanggal-bulan-tahun jam:menit] | [judul tugas] | [tangga alarm]\`\n` +
+                    `• *Cara Kasual*: Bicara santai lewat chat, misal: "bot tolong ingetin ada tugas pengkondisian sinyal besok jam 10:00"\n` +
+                    `• *Cara Kaku*: \`/tambahdeadline [tanggal-bulan-tahun jam:menit] | [judul tugas] | [tangga alarm]\`\n` +
                     `• *Contoh*: \`/tambahdeadline 08-07-2026 13:00 | kuis power electronics | 1hari,2jam,15menit\`\n\n` +
                     `📌 *3. INTEGRASI PENGERUKAN INFORMASI TELEGRAM*\n` +
                     `Lu bisa ngintip informasi pengumuman penting dari Telegram dan meneruskannya langsung ke grup WhatsApp sirkel lu bray.\n` +
                     `• */tglist [nama_grup]* : Mengintip 10 daftar isi percakapan terakhir di grup Telegram sasaran bray.\n` +
                     `• */tgforward [nama_grup] [nomor_id_pesan]* : Meneruskan secara resmi pesan pilihan dari Telegram ke grup WhatsApp dalam resolusi tinggi asli tanpa kompresi burik bray.\n\n` +
                     `📌 *4. MANAJEMEN ARSIP LAPORAN KELOMPOK*\n` +
-                    `Setiap tugas kelompok selesai, asisten bakal ngarsip data keaktifan anak-anak secara permanen di database bray.\n` +
-                    `• */listlaporan* : Menampilkan semua daftar arsip laporan kelompok yang pernah dibuat bray.\n` +
+                    `• */listlaporan* : Menampilkan semua daftar arsip laporan kelompok bray.\n` +
                     `• */detaillaporan [id_arsip]* : Membongkar isi teks laporan keaktifan secara utuh bray.\n` +
-                    `• */hapuslaporan [id_arsip]* : Menghapus berkas arsip lama dari penyimpanan peladen bray.\n\n` +
+                    `• */hapuslaporan [id_arsip]* : Menghapus berkas arsip lama bray.\n\n` +
                     `📌 *5. MODIFIKASI PARAMETER PAS PROSES KONFIRMASI DRAF*\n` +
-                    `Pas lu bikin agenda baru lewat obrolan kasual, bot bakal nampilin draf pratinjau dulu bray. Lu bisa ketik kalimat santai berikut buat ngubah manifesnya sebelum disimpan:\n` +
+                    `Pas draf pratinjau muncul di chat, lu bisa ketik kalimat santai berikut buat ngubah settingan parameter agenda sebelum disimpan bray:\n` +
                     `• *ganti judul jadi...* : Mengubah nama aktivitas agenda bray.\n` +
                     `• *ganti waktu jadi...* : Mengubah jam target operasi bray.\n` +
-                    `• *matikan pelacakan* : Mengubah agenda jadi ramah tanpa perlu neror chat pribadi anggota sirkel bray.\n` +
-                    `• *matikan laporan* : Mengunci bot agar tidak mengirim draf laporan keaktifan kelompok ke grup utama bray.\n\n` +
-                    `📌 *6. ANALISIS PERCAKAPAN & PROFIL BAHASA*\n` +
-                    `• */rangkuman [jumlah_pesan]* : Merangkum silang pendapat atau alur obrolan grup yang panjang menjadi poin strip ringkas bray.\n` +
-                    `• *panggil gue [nama_panggilan]* : Mendaftarkan nama panggilan asli lu ke database kamus mapping biar gaya bicara bot pas nyapa jadi lebih personal bray.`;
+                    `• *matikan pelacakan* : Mengubah agenda jadi ramah tanpa perlu neror chat pribadi bray.\n` +
+                    `• *matikan laporan* : Mengunci bot agar tidak mengirim draf laporan keaktifan ke grup bray.\n\n` +
+                    `📌 *6. PENGENALAN IDENTITAS & KAMUS NOMOR KELOMPOK*\n` +
+                    `Biar bot pinter manggil nama asli anak-anak kelompok pas nerbitin laporan atau interogasi chat pribadi, daftarin nama panggilan lu pake cara ini bray:\n` +
+                    `• *Cara Kasual Mandiri*: Ketik di chat: "panggil gue [nama_panggilan_lu]"\n` +
+                    `• *Cara Kaku Mandiri*: Ketik perintah: \`/panggilgue [nama_panggilan_lu]\`\n` +
+                    `• *Cara Kasual Owner*: Khusus dyan buat daftarin nomor temen sepihak: "daftarin [nomor_hp] sebagai [nama_panggilan]"\n` +
+                    `• *Cara Kaku Owner*: Khusus dyan mendaftarkan nomor lewat command: \`/daftarin [nomor_hp] [nama_panggilan]\``;
 
                 await sock.sendMessage(fromJid, { text: menuHelp }, { quoted: msg });
                 return;
@@ -1495,8 +1498,17 @@ async function startBot() {
                 
             } else {
                 // SENSOR PENYUNTING NAMA PANGGILAN KASUAL OVERRIDE
-                if (lowText.startsWith('panggil gue ') || lowText.startsWith('panggil gua ')) {
-                    const namaBaru = text.replace(/panggil gue|panggil gua/gi, '').trim();
+                // ====================================================================
+                // KONDISI PENGENALAN IDENTITAS MANDIRI (KASUAL & KAKU SLASH)
+                // ====================================================================
+                if (lowText.startsWith('panggil gue ') || lowText.startsWith('panggil gua ') || cmd === '/panggilgue') {
+                    let namaBaru = '';
+                    if (cmd === '/panggilgue') {
+                        namaBaru = text.slice(11).trim();
+                    } else {
+                        namaBaru = text.replace(/panggil gue|panggil gua/gi, '').trim();
+                    }
+                    
                     if (namaBaru.length > 0) {
                         config.accountMapping[senderJid] = namaBaru;
                         saveConfig(config);
@@ -1508,7 +1520,41 @@ async function startBot() {
                     }
                 }
 
-                if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke'].some(w => lowText === w || lowText.includes(w))) {
+                // ====================================================================
+                // KONDISI PENGENALAN SEPIHAK OLEH OWNER (KASUAL & KAKU SLASH)
+                // ====================================================================
+                if (fromJid === config.ownerJid && (lowText.startsWith('daftarin ') || cmd === '/daftarin')) {
+                    let nomorTarget = '';
+                    let namaTarget = '';
+
+                    if (cmd === '/daftarin') {
+                        const args = text.slice(9).trim().split(/\s+/);
+                        if (args.length >= 2) {
+                            nomorTarget = args[0].trim().replace(/[^0-9]/g, '');
+                            namaTarget = args.slice(1).join(' ').trim();
+                        }
+                    } else {
+                        const cleanText = text.replace(/daftarin /gi, '').trim();
+                        const parts = cleanText.split(/ sebagai /i);
+                        if (parts.length === 2) {
+                            nomorTarget = parts[0].trim().replace(/[^0-9]/g, '');
+                            namaTarget = parts[1].trim();
+                        }
+                    }
+                    
+                    if (nomorTarget && namaTarget) {
+                        if (!nomorTarget.endsWith('@s.whatsapp.net')) {
+                            nomorTarget = `${nomorTarget}@s.whatsapp.net`;
+                        }
+                        config.accountMapping[nomorTarget] = namaTarget;
+                        saveConfig(config);
+                        
+                        await sock.sendMessage(fromJid, { text: `beres yan, nomor ${nomorTarget.split('@')[0]} resmi gue catat sebagai *${namaTarget}* di database bray` }, { quoted: msg });
+                        return;
+                    }
+                }
+
+                if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke', 'okee', 'okss', 'sipp', 'sippp'].some(w => lowText === w || lowText.includes(w))) {
                     if (userStates[fromJid] && userStates[fromJid].mode === 'chat') {
                         resetState(fromJid);
                         await sock.sendMessage(fromJid, { text: `oke siap obrolan gue tutup ya bray ${currentNick}` }, { quoted: msg });
@@ -1519,6 +1565,31 @@ async function startBot() {
                 setState(fromJid, 'chat');
                 
                 let pesanBalasanFinal = '';
+                
+                if (isGroup) {
+                    if (groupChatMemory[fromJid].length < 5) {
+                        const restartPrompt = `Lu adalah asisten kelompok kuliah yang santai. Server lu baru aja restart sehingga memori obrolan lokal lu kosong bersih. Berikan respon maaf kasual dengan gaya lu-gue, santai, huruf kecil semua bray, menyampaikan kalimat "gue gatau bray servernya baru aja restart wkwk jadi ga nyimak percakapan lo pada sorry yaaa".`;
+                        
+                        const { generateAIText } = require('./geminiClient');
+                        const aiRestartRes = await generateAIText(restartPrompt, {}, '', 'gue gatau bray servernya baru aja restart wkwk jadi ga nyimak percakapan lo pada sorry yaaa', false);
+                        
+                        await sock.sendMessage(fromJid, { text: aiRestartRes.text.trim() }, { quoted: msg });
+                        return;
+                    }
+
+                    const transkripObrolan = groupChatMemory[fromJid].map(c => `[${c.sender}]: ${c.text}`).join('\n');
+                    
+                    const opiniPrompt = `Lu adalah anggota kelompok kuliah yang cerdas, solutif, dan menyimak dinamika obrolan grup dari pojokan room chat. Hari ini lu ditanya pendapat atau dimintai solusi oleh si ${currentNick} dengan pertanyaan: "${processingText}". Transkrip obrolan anak-anak sebelumnya: \n${transkripObrolan}`;
+                    
+                    const { generateAIText } = require('./geminiClient');
+                    const aiOpiniRes = await generateAIText(opiniPrompt, {}, '', 'sori bray otak gue lagi agak nge-lag, coba jelasin intinya aja', false);
+                    pesanBalasanFinal = aiOpiniRes.text;
+                } else {
+                    pesanBalasanFinal = await generateMimicReply(processingText, samples, chatMemory[fromJid] || [], currentNick);
+                }
+
+                pushToMemory(fromJid, 'bot', pesanBalasanFinal);
+                await sock.sendMessage(fromJid, { text: pesanBalasanFinal }, { quoted: msg });
                 
                 if (isGroup) {
                     // KATUP PENGAMAN AMNESIA RESTART SERVER (Membaca RAM jangka pendek bray)
