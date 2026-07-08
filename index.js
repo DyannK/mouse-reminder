@@ -942,11 +942,15 @@ async function startBot() {
                     return;
                 }
                 
-                await sock.sendMessage(fromJid, { text: `bentar ya yan, gue intip dulu riwayat chat terakhir di grup telegram *${groupName}*...` }, { quoted: msg });
+                await sock.sendMessage(fromJid, { text: `bentar ya, gue intip dulu riwayat chat terakhir di grup telegram *${groupName}*...` }, { quoted: msg });
                 
                 try {
                     const { getRecentMessages } = require('./telegramScraper');
                     const result = await getRecentMessages(groupName, 10);
+                    
+                    // SUNTIKKAN JEDA SIMULASI NGETIK DI SINI BRAY BIAR GA BERUNTUN
+                    await sock.sendPresenceUpdate('composing', fromJid);
+                    await new Promise(r => setTimeout(r, 2500 + Math.random() * 1500));
                     
                     let outText = `📋 *[intip chat telegram]*\nsumber: *${result.title}*\n\n`;
                     result.list.reverse().forEach(m => {
