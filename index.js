@@ -778,7 +778,6 @@ async function startBot() {
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-        console.log(`📡 [radar] tipe: ${m.type} | id: ${m.messages[0]?.key?.id} | teks: ${text}`);
         if (m.type !== 'notify') return; // SEKAT PENGAMAN BIAR GA LOG MASUK TIPE APPEND/DUPLIKAT BRAY!
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
@@ -816,6 +815,8 @@ async function startBot() {
         const senderName = msg.pushName || 'orang';
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
+        console.log(`📡 [radar] tipe: ${m.type} | id: ${idPesanUnik} | teks: ${text}`);
+
         const lowText = text.trim().toLowerCase();
         const cmd = text.startsWith('/') ? lowText.split(' ')[0] : ''; // DEKLARASIKAN CMD DI SINI BIAR GA ERROR REFERENCE BRAY!
         
