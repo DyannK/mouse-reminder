@@ -1622,43 +1622,6 @@ async function startBot() {
                 pushToMemory(fromJid, 'bot', pesanBalasanFinal);
                 await sock.sendMessage(fromJid, { text: pesanBalasanFinal }, { quoted: msg });
                 
-                if (isGroup) {
-                    // KATUP PENGAMAN AMNESIA RESTART SERVER (Membaca RAM jangka pendek bray)
-                    if (groupChatMemory[fromJid].length < 5) {
-                        const restartPrompt = `Lu adalah asisten kelompok kuliah yang santai. Server lu baru aja restart sehingga memori obrolan lokal lu kosong bersih dan lu ga tau topik apa yang lagi dibahas anak-anak sebelumnya. 
-                        Tugas lu: Berikan respon maaf kasual dengan gaya lu-gue, santai, huruf kecil semua, dan wajib menyelipkan vibes utama kalimat "gue gatau, servernya baru aja restart wkwk, jadi ga nyimak percakapan lo pada, sorry yaaa". Jangan beri penjelasan robot, langsung kalimat chat aslinya aja bray.`;
-                        
-                        const { generateAIText } = require('./geminiClient');
-                        const aiRestartRes = await generateAIText(restartPrompt, {}, '', 'gue gatau bray servernya baru aja restart wkwk jadi ga nyimak percakapan lo pada sorry yaaa', false);
-                        
-                        await sock.sendMessage(fromJid, { text: aiRestartRes.text.trim() }, { quoted: msg });
-                        return;
-                    }
-
-                    // PROSES DETEKSI OPINI TONGKRONGAN LIVE (30 VS 5 BUBBLE - BASIS RAM)
-                    const transkripObrolan = groupChatMemory[fromJid].map(c => `[${c.sender}]: ${c.text}`).join('\n');
-                    
-                    const opiniPrompt = `Lu adalah anggota kelompok kuliah yang cerdas, solutif, dan menyimak dinamika obrolan grup dari pojokan room chat.
-                    Hari ini lu ditanya pendapat atau dimintai solusi oleh si ${currentNick} dengan pertanyaan: "${processingText}".
-                    
-                    Berikut adalah transkrip obrolan anak-anak sebelumnya di grup ini (urut kronologis dari past ke now, chat paling bawah adalah yang paling baru):
-                    ${transkripObrolan}
-                    
-                    Instruksi berpikir wajib:
-                    1. Analisis apa topik yang paling hangat atau happening dibahas saat ini. Ingat aturan kronologis: meskipun topik lama punya 30 bubble obrolan di atas, kalau di 5 bubble paling bawah anak-anak sudah bergeser membahas hal baru, berarti fokus utama lu adalah topik baru yang 5 bubble tersebut bray.
-                    2. Kenali siapa bicara apa secara detail. Sebutkan siapa pemilik statement A dan siapa pemilik statement B. Jika lu setuju dengan salah satu dari mereka, sebutkan kutipan atau intisari alasannya secara spesifik dan menggunakan kata semi tidak baku tongkrongan (seperti "bilang kalo", "ga setuju karna").
-                    3. Jawab santai, solutif, huruf kecil semua (lowercase), tanpa format pointer list kaku, dan hilangkan identitas lu sebagai robot bray.`;
-                    
-                    const { generateAIText } = require('./geminiClient');
-                    const aiOpiniRes = await generateAIText(opiniPrompt, {}, '', 'sori bray otak gue lagi agak nge-lag, coba jelasin intinya aja', false);
-                    pesanBalasanFinal = aiOpiniRes.text;
-                } else {
-                    // NAMBAHIN NAMA PANGGILAN KE AI
-                    pesanBalasanFinal = await generateMimicReply(processingText, samples, chatMemory[fromJid] || [], currentNick);
-                }
-
-                pushToMemory(fromJid, 'bot', pesanBalasanFinal);
-                await sock.sendMessage(fromJid, { text: pesanBalasanFinal }, { quoted: msg });
             }
         }
         
