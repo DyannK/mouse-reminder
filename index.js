@@ -778,6 +778,7 @@ async function startBot() {
     });
 
     sock.ev.on('messages.upsert', async (m) => {
+        console.log(`📡 [radar] tipe: ${m.type} | id: ${m.messages[0]?.key?.id} | teks: ${text}`);
         if (m.type !== 'notify') return; // SEKAT PENGAMAN BIAR GA LOG MASUK TIPE APPEND/DUPLIKAT BRAY!
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
