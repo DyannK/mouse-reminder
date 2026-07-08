@@ -102,7 +102,8 @@ async function callAIWithHybridRotation(prompt, isJson = false, systemInstructio
 }
 
 function buildGayaInstruction() {
-    return 'gaya bahasa wajib menggunakan huruf kecil semua tanpa perkecualian, termasuk penulisan nama panggilan orang (yan, med, zar, yog). mengalir sangat santai natural seperti wa anak tongkrongan sehari-hari. dilarang keras menyisipkan tanda koma tepat sebelum panggilan nama (contoh salah: "apa, yan?", "halo, med". contoh benar: "apa yan", "halo med"). buang total atau kurangi penggunaan tanda baca berlebih atau lebay seperti !?, double tanda tanya, atau koma beruntun.';
+    // ATURAN SAKLEK UNTUK TETAP MEMPERTAHANKAN KAPITALISASI FIFO/LIFO BRAY!
+    return 'gaya bahasa wajib menggunakan huruf kecil semua (lowercase) untuk seluruh kalimat dan kata panggilan, KECUALI untuk singkatan teknis, istilah/definisi khusus yang jarang disebutkan, atau produk unpopular yang aslinya memang berupa kapital penuh (contoh: FIFO, LIFO). jangan gunakan huruf kapital untuk nama orang atau di awal kalimat biasa bray. mengalir sangat santai natural seperti wa anak tongkrongan sehari-hari. dilarang keras menyisipkan tanda koma tepat sebelum panggilan nama (contoh salah: "apa, yan?", "halo, med". contoh benar: "apa yan", "halo med"). buang total atau kurangi penggunaan tanda baca berlebih atau lebay seperti !?, double tanda tanya, atau koma beruntun.';
 }
 
 async function generateAIText(tema, context = {}, styleInstruction = null, manualFallback = null, formal = false) {
@@ -115,7 +116,8 @@ async function generateAIText(tema, context = {}, styleInstruction = null, manua
     if (context.judul) prompt += ` judul agenda: ${context.judul}.`;
     
     const result = await callAIWithHybridRotation(prompt, false, buildGayaInstruction());
-    if (result.text) return { text: result.text.toLowerCase(), usedFallback: false };
+    // HAPUS .toLowerCase() BIAR ISTILAH KHUSUS KELUARAN GEMINI TETAP TERJAGA KAPITALNYA BRAY
+    if (result.text) return { text: result.text, usedFallback: false };
     
     return { text: fallbackText.toLowerCase(), usedFallback: true };
 }
@@ -125,7 +127,26 @@ async function generateTagReply(triggerText, styleInstruction = null) {
     if (styleInstruction) prompt += ` ${styleInstruction}`;
 
     const result = await callAIWithHybridRotation(prompt, false, buildGayaInstruction());
-    return result.text ? result.text.toLowerCase() : 'oi ada apa yan';
+    // HAPUS .toLowerCase() BIAR FORMAT SINKRON KE BAWAH YAN
+    return result.text ? result.text : 'oi ada apa yan';
+}
+
+// SEKARANG FUNGSI MIMIC UDAH MAU MENERIMA OPERAN PARAMETER CURRENTNICK BRAY!
+async function generateMimicReply(triggerText, recentSamples, conversationHistory = [], currentNick = 'coy') {
+    const system = `lu adalah bot reminder jadwal sekaligus temen nongkrong digital di wa yang dikembangkan atau dibuat oleh dyan khusus buat jagain agenda personal dan kelompok mereka.
+aturan mutlak:
+1. jika user bertanya soal identitas (seperti: siapa lu, lu apa, siapa yang bikin lu, dll), jawab kasual kalau lu itu bot pengingat jadwal buatan dyan yang stand by jadi asisten digital mereka.
+2. pakai gaya bahasa indonesia semi-betawi kasual banget, pakai gue/lo atau gua/lo. wajib huruf kecil semua (lowercase) untuk seluruh kalimat, KECUALI untuk singkatan teknis, istilah khusus, atau produk unpopular yang aslinya memang berupa kapital penuh (contoh: FIFO, LIFO). jangan gunakan huruf kapital untuk nama orang atau di awal kalimat biasa bray.
+3. dilarang keras menyelipkan tanda koma tepat sebelum panggilan nama (contoh: "kenape yan?" bukan "ada apa, yan?"). kurangi total tanda baca lebay atau tidak penting seperti !?, double tanda tanya, atau rentetan koma.
+4. perhatikan emosi pengguna dan tiru karakteristik ketikannya dari profil ini: ${recentSamples.join(' | ')}
+5. lu wajib membaca runtunan riwayat percakapan sebelumnya agar jawaban lu mengakar, nyambung, dan memahami konteks pembicaraan dari bubble ke bubble sebelumnya secara akurat.
+6. sapa atau panggil user menggunakan nama panggilannya: "${currentNick}" secara natural di dalam obrolan obrolan pribadi lu bray, jangan keseringan pake kata panggil default kasual jikalau nama panggilannya sudah terdeteksi jelas.`;
+    
+    let prompt = `Riwayat percakapan terakhir lu dan user:\n${conversationHistory.join('\n')}\n\nUser baru saja mengetik pesan: "${triggerText}"\nBalas dengan mengalir dan mengakar sesuai konteks riwayat di atas:`;
+    
+    const result = await callAIWithHybridRotation(prompt, false, system);
+    // HAPUS .toLowerCase() DISINI AGAR ATURAN PENGECUALIAN HURUF KAPITAL LU WORK 100% DI CHAT PRIBADI YAN!
+    return result.text ? result.text : 'waduh otak gue ngeblank bentar bray';
 }
 
 async function parseIntentFromText(triggerText) {
@@ -187,21 +208,6 @@ format output json murni:
     }
 }
 
-// HASIL AUDIT: Penanaman parameter identitas dinamis pada sistem memori tongkrongan
-async function generateMimicReply(triggerText, recentSamples, conversationHistory = []) {
-    const system = `lu adalah bot reminder jadwal sekaligus temen nongkrong digital di wa yang dikembangkan atau dibuat oleh dyan khusus buat jagain agenda personal dan kelompok mereka.
-aturan mutlak:
-1. jika user bertanya soal identitas (seperti: siapa lu, lu apa, siapa yang bikin lu, dll), jawab kasual kalau lu itu bot pengingat jadwal buatan dyan yang stand by jadi asisten digital mereka.
-2. pakai gaya bahasa indonesia semi-betawi kasual banget, pakai gue/lo atau gua/lo. wajib huruf kecil semua termasuk penulisan nama panggilan (yan, med, zar, yog).
-3. dilarang keras menyelipkan tanda koma tepat sebelum panggilan nama (contoh: "kenape yan?" bukan "ada apa, yan?"). kurangi total tanda baca lebay atau tidak penting seperti !?, double tanya, atau rentetan koma.
-4. perhatikan emosi pengguna dan tiru karakteristik ketikannya dari profil ini: ${recentSamples.join(' | ')}
-5. lu wajib membaca runtunan riwayat percakapan sebelumnya agar jawaban lu mengakar, nyambung, dan memahami konteks pembicaraan dari bubble ke bubble sebelumnya secara akurat.`;
-    
-    let prompt = `Riwayat percakapan terakhir lu dan user:\n${conversationHistory.join('\n')}\n\nUser baru saja mengetik pesan: "${triggerText}"\nBalas dengan mengalir dan mengakar sesuai konteks riwayat di atas:`;
-    
-    const result = await callAIWithHybridRotation(prompt, false, system);
-    return result.text ? result.text.toLowerCase() : 'waduh otak gue ngeblank bentar bray';
-}
 
 async function generateDynamicStateText(fallbackText, currentNick, samples, history = []) {
     const system = `lu adalah asisten personal kasual di wa buatan dyan. tugas lu adalah mengubah pesan status operasional sistem menjadi untaian kalimat obrolan wa yang super natural.

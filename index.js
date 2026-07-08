@@ -1365,7 +1365,8 @@ async function startBot() {
                     const aiOpiniRes = await generateAIText(opiniPrompt, {}, '', 'sori bray otak gue lagi agak nge-lag, coba jelasin intinya aja', false);
                     pesanBalasanFinal = aiOpiniRes.text;
                 } else {
-                    pesanBalasanFinal = await generateMimicReply(processingText, samples, chatMemory[fromJid] || []);
+                    // NAMBAHIN NAMA PANGGILAN KE AI
+                    pesanBalasanFinal = await generateMimicReply(processingText, samples, chatMemory[fromJid] || [], currentNick);
                 }
 
                 pushToMemory(fromJid, 'bot', pesanBalasanFinal);
