@@ -20,6 +20,7 @@ const userStates = {};
 const chatMemory = {};
 const groupCache = {}; // Tempat simpan memori grup biar ga diblokir server
 const targetPesanTerproses = new Set(); // Tameng pelindung ID pesan masuk
+const memoriKontenTerproses = new Map(); // Tameng hibrida isi teks anti-retry perangkat bray
 
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -778,47 +779,57 @@ async function startBot() {
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-        if (m.type !== 'notify') return; // SEKAT PENGAMAN BIAR GA LOG MASUK TIPE APPEND/DUPLIKAT BRAY!
+        if (m.type !== 'notify') return; 
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
-        // ====================================================================
-        // TAMENG KUNCI IDEMPOTENSI: JIKA ID PESAN SUDAH PERNAH DIRESPON, BUANG!
-        // ====================================================================
+        // TAMENG LAPIS 1: SAKLAR ID PESAN SAMA (FAST-TRACK)
         const idPesanUnik = msg.key.id;
         if (targetPesanTerproses.has(idPesanUnik)) {
-            console.log(`[pengaman] pesan id ${idPesanUnik} duplikat, abaikan sepihak bray.`);
+            console.log(`[pengaman] pesan id ${idPesanUnik} duplikat, abaikan bray.`);
             return;
         }
-        targetPesanTerproses.add(idPesanUnik);
 
-        // Batasi ukuran Set biar memori RAM Termux lo ga bengkak yan
-        if (targetPesanTerproses.size > 200) {
-            const kunciPertama = targetPesanTerproses.values().next().value;
-            targetPesanTerproses.delete(kunciPertama);
-        }
-        
-        if (msg.message.ephemeralMessage) {
-            msg.message = msg.message.ephemeralMessage.message;
-        }
-        if (msg.message.viewOnceMessage) {
-            msg.message = msg.message.viewOnceMessage.message;
-        }
-        if (msg.message.viewOnceMessageV2) {
-            msg.message = msg.message.viewOnceMessageV2.message;
-        }
+        if (msg.message.ephemeralMessage) { msg.message = msg.message.ephemeralMessage.message; }
+        if (msg.message.viewOnceMessage) { msg.message = msg.message.viewOnceMessage.message; }
+        if (msg.message.viewOnceMessageV2) { msg.message = msg.message.viewOnceMessageV2.message; }
         if (!msg.message) return;
 
         const fromJid = msg.remoteJid || msg.key.remoteJid;
         const isGroup = fromJid.endsWith('@g.us');
         const senderJid = isGroup ? (msg.key.participant || fromJid) : fromJid;
-        const senderName = msg.pushName || 'orang';
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
         
-        console.log(`📡 [radar] tipe: ${m.type} | id: ${idPesanUnik} | teks: ${text}`);
+        // TAMENG LAPIS 2: KUNCI ISI TEKS + JEDA WAKTU (Pencegah duplikat beda ID akibat retry jaringan)
+        const kunciKontenUnik = `${senderJid}_${text.trim().toLowerCase()}`;
+        const waktuSekarang = Date.now();
+        
+        if (memoriKontenTerproses.has(kunciKontenUnik)) {
+            const waktuLama = memoriKontenTerproses.get(kunciKontenUnik);
+            if (waktuSekarang - waktuLama < 5000) { // Toleransi kunci kembar gaib 5 detik yan bray
+                console.log(`[pengaman hibrida] teks "${text}" diabaikan karena terindikasi retransmisi jaringan bray.`);
+                return;
+            }
+        }
+
+        // JIKA LULOS KEDUA SECURITY, KUNCI PERMANEN DI MEMORI RAM YAN
+        targetPesanTerproses.add(idPesanUnik);
+        memoriKontenTerproses.set(kunciKontenUnik, waktuSekarang);
+
+        // Katup pembersih sampah RAM Termux biar ga bengkak
+        if (targetPesanTerproses.size > 200) {
+            const kunciPertama = targetPesanTerproses.values().next().value;
+            targetPesanTerproses.delete(kunciPertama);
+        }
+        if (memoriKontenTerproses.size > 100) {
+            const kunciPertamaMap = memoriKontenTerproses.keys().next().value;
+            memoriKontenTerproses.delete(kunciPertamaMap);
+        }
+
+        console.log(`📡 [radar terverifikasi] id: ${idPesanUnik} | teks: ${text}`);
 
         const lowText = text.trim().toLowerCase();
-        const cmd = text.startsWith('/') ? lowText.split(' ')[0] : ''; // DEKLARASIKAN CMD DI SINI BIAR GA ERROR REFERENCE BRAY!
+        const cmd = text.startsWith('/') ? lowText.split(' ')[0] : '';
         
         let config = loadConfig();
         
