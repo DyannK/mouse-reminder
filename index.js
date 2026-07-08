@@ -932,6 +932,73 @@ async function startBot() {
                 return;
             }
             
+            // ====================================================================
+            // PERINTAH UTAMA: INTIP 10 LIST CHAT TERAKHIR DI TELEGRAM BRAY
+            // ====================================================================
+            if (cmd.startsWith('/tglist')) {
+                const groupName = text.slice(7).trim();
+                if (!groupName) {
+                    await sock.sendMessage(fromJid, { text: 'format salah bray, contoh: */tglist nama_grup_lu*' }, { quoted: msg });
+                    return;
+                }
+                
+                await sock.sendMessage(fromJid, { text: `bentar ya yan, gue intip dulu riwayat chat terakhir di grup telegram *${groupName}*...` }, { quoted: msg });
+                
+                try {
+                    const { getRecentMessages } = require('./telegramScraper');
+                    const result = await getRecentMessages(groupName, 10);
+                    
+                    let outText = `📋 *[intip chat telegram]*\nsumber: *${result.title}*\n\n`;
+                    result.list.reverse().forEach(m => {
+                        const snippet = m.text.length > 70 ? m.text.slice(0, 70) + '...' : m.text;
+                        outText += `🆔 *id: ${m.id}*\n💬 ${snippet}\n-------------------------\n`;
+                    });
+                    outText += `\n_ketik */tgforward ${groupName} [id_pesan]* buat nerusin pesan pilihan lu resmi ke grup wa bray._`;
+                    
+                    await sock.sendMessage(fromJid, { text: outText }, { quoted: msg });
+                } catch (err) {
+                    await sock.sendMessage(fromJid, { text: `gagal ngintip telegram bray: ${err.message}` }, { quoted: msg });
+                }
+                return;
+            }
+
+            // ====================================================================
+            // PERINTAH UTAMA: FORWARD PESAN PILIHAN BERDASARKAN ID NYA YAN
+            // ====================================================================
+            if (cmd.startsWith('/tgforward')) {
+                const args = text.slice(10).trim().split(/\s+/);
+                if (args.length < 2) {
+                    await sock.sendMessage(fromJid, { text: 'format salah bray, contoh: */tgforward nama_grup id_pesan*' }, { quoted: msg });
+                    return;
+                }
+                
+                const messageId = args[args.length - 1];
+                const groupName = text.slice(10).replace(messageId, '').trim();
+                
+                if (isNaN(messageId)) {
+                    await sock.sendMessage(fromJid, { text: 'id pesan harus pake angka bray kocak' }, { quoted: msg });
+                    return;
+                }
+
+                await sock.sendMessage(fromJid, { text: `siap bray, lagi ngambil data pesan id *${messageId}* dari telegram...` }, { quoted: msg });
+
+                try {
+                    const { fetchSingleMessage } = require('./telegramScraper');
+                    const targetMsg = await fetchSingleMessage(groupName, messageId);
+                    
+                    let whatsappPayload = `*[DITERUSKAN DARI TELEGRAM]*\n`;
+                    whatsappPayload += `Sumber: ${targetMsg.chatTitle}\n`;
+                    whatsappPayload += `Pengirim: ${targetMsg.senderName}\n\n`;
+                    whatsappPayload += targetMsg.text;
+
+                    await sock.sendMessage(config.groupJid, { text: whatsappPayload });
+                    await sock.sendMessage(fromJid, { text: `beres bray, pesan id ${messageId} sukses diteruskan ke grup wa kuliah lu!` }, { quoted: msg });
+                } catch (err) {
+                    await sock.sendMessage(fromJid, { text: `gagal nerusin pesan bray: ${err.message}` }, { quoted: msg });
+                }
+                return;
+            }
+
             if (cmd.startsWith('/tambah ') && text.includes('|')) {
                 const parts = text.slice(8).split('|');
                 const pattern = parts[0].trim();

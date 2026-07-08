@@ -48,7 +48,6 @@ async function initTelegramScraper(sock) {
 
     console.log('Modul pengerukan Telegram aktif dan berjalan di latar belakang.');
 
-    // Langkah 1: Pemanasan penyimpanan data lokal untuk memuat seluruh grup aktif di awal
     try {
         await client.getDialogs({});
         console.log('Penyimpanan data lokal grup Telegram berhasil diperbarui.');
@@ -64,7 +63,6 @@ async function initTelegramScraper(sock) {
             let chatTitle = 'Grup Telegram';
             let chatIdStr = '';
 
-            // Langkah 2a: Proteksi pencarian identitas grup agar tidak memicu galat kritis
             try {
                 const chatEntity = await client.getEntity(message.peerId);
                 chatTitle = chatEntity.title || 'Grup Telegram';
@@ -89,7 +87,6 @@ async function initTelegramScraper(sock) {
 
             let senderName = 'Anggota Grup';
 
-            // Langkah 2b: Proteksi pencarian nama pengirim menggunakan blok pelindung mandiri
             if (message.fromId) {
                 try {
                     const senderEntity = await client.getEntity(message.fromId);
@@ -117,4 +114,89 @@ async function initTelegramScraper(sock) {
     }, new NewMessage({}));
 }
 
-module.exports = { initTelegramScraper };
+// ====================================================================
+// FUNGSI BARU: MENDUKUNG FITUR INTIP OBROLAN TERAKHIR TELEGRAM YAN BRAY
+// ====================================================================
+async function getRecentMessages(groupNameOrId, limit = 10) {
+    if (!client) throw new Error('client telegram belum aktif bray.');
+    
+    const dialogs = await client.getDialogs({});
+    let targetEntity = null;
+    let foundTitle = groupNameOrId;
+
+    for (const dialog of dialogs) {
+        const chatTitle = dialog.title || '';
+        const chatIdStr = dialog.id ? dialog.id.toString() : '';
+        const cleanTarget = groupNameOrId.trim().toLowerCase();
+
+        if (chatTitle.toLowerCase() === cleanTarget || chatIdStr === cleanTarget || `-100${chatIdStr}` === cleanTarget) {
+            targetEntity = dialog.entity;
+            foundTitle = chatTitle;
+            break;
+        }
+    }
+
+    if (!targetEntity) {
+        throw new Error(`grup atau channel "${groupNameOrId}" ga ketemu di daftar obrolan bray.`);
+    }
+
+    const messages = await client.getMessages(targetEntity, { limit });
+    return {
+        title: foundTitle,
+        list: messages.map(m => ({
+            id: m.id,
+            text: (m.message || '').trim() || '[media / tanpa teks]'
+        }))
+    };
+}
+
+// ====================================================================
+// FUNGSI BARU: MENARIK SATU DATA PESAN PILIHAN BERDASARKAN NOMOR ID
+// ====================================================================
+async function fetchSingleMessage(groupNameOrId, messageId) {
+    if (!client) throw new Error('client telegram belum aktif bray.');
+
+    const dialogs = await client.getDialogs({});
+    let targetEntity = null;
+    let foundTitle = groupNameOrId;
+
+    for (const dialog of dialogs) {
+        const chatTitle = dialog.title || '';
+        const chatIdStr = dialog.id ? dialog.id.toString() : '';
+        const cleanTarget = groupNameOrId.trim().toLowerCase();
+
+        if (chatTitle.toLowerCase() === cleanTarget || chatIdStr === cleanTarget || `-100${chatIdStr}` === cleanTarget) {
+            targetEntity = dialog.entity;
+            foundTitle = chatTitle;
+            break;
+        }
+    }
+
+    if (!targetEntity) {
+        throw new Error(`grup atau channel "${groupNameOrId}" ga ketemu bray.`);
+    }
+
+    const messages = await client.getMessages(targetEntity, { ids: [parseInt(messageId, 10)] });
+    if (!messages || messages.length === 0 || !messages[0]) {
+        throw new Error(`pesan dengan id ${messageId} ga ketemu di grup ${foundTitle} bray.`);
+    }
+
+    const msg = messages[0];
+    let senderName = 'Anggota Grup';
+    if (msg.fromId) {
+        try {
+            const senderEntity = await client.getEntity(msg.fromId);
+            senderName = senderEntity.firstName || senderEntity.username || 'Anggota Grup';
+        } catch (e) {
+            // Gagal senyap bray
+        }
+    }
+
+    return {
+        chatTitle: foundTitle,
+        senderName,
+        text: (msg.message || '').trim() || '[media / tanpa teks]'
+    };
+}
+
+module.exports = { initTelegramScraper, getRecentMessages, fetchSingleMessage };
