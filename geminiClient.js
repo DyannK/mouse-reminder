@@ -171,6 +171,7 @@ pilihan intent:
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
 aturan ekstraksi parameter untuk "create_schedule":
+- jika user memasukkan teks yang mengandung awalan "AI:", itu adalah bagian dari string template pesan biasa, jangan pernah dihapus atau dipotong kata "AI:" tersebut dari hasil ekstraksi string!
 - jika user menyebutkan rentetan menit pengingat spesifik (misal: "pengingat di 30 menit, 20 menit, 10 menit..."), ambil seluruh angka menit tersebut, susun menjadi array/larik angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
 - jika tidak ada rentetan menit spesifik melainkan kata perulangan rutin (misal: "tiap menit", "per-5 menit"), isi properti "intervalMinutes" dengan angka menit tersebut dan buat "customMilestones" menjadi null.
 - jika user menyebutkan kata pembatalan laporan (misal: "tanpa laporan", "matikan laporan", "laporan off"), set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.

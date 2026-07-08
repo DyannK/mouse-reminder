@@ -187,10 +187,7 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
 
     // FORMAT BARU: Langsung memetakan kalimat kasual manusia bray
     const buatLabelJamDinamis = (menitMundur) => {
-        const waktuAlarmMs = targetDate.getTime() - (menitMundur * 60 * 1000);
-        const komponenJam = getJakartaDateComponents(new Date(waktuAlarmMs));
-        const teksJamMenit = `${String(komponenJam.hour).padStart(2, '0')}:${String(komponenJam.minute).padStart(2, '0')} WIB`;
-        return menitMundur === 0 ? `agenda dimulai jam [${teksJamMenit}]` : `pengingat ${menitMundur} menit di jam [${teksJamMenit}]`;
+    return menitMundur === 0 ? `waktu utama` : `${menitMundur} menit lagi menuju jam (${waktuTarget})`;
     };
 
     if (customMilestones && Array.isArray(customMilestones)) {
@@ -291,7 +288,8 @@ async function handleListDetail(sock, fromJid) {
             const listTargetBersih = r.targets.map(t => {
                 if (t === 'group') return 'grup kuliah';
                 const nomorMurni = t.split('@')[0];
-                const namaKamus = config.accountMapping?.[t] || '';
+                // Jika JID mengandung potongan nomor owner, paksa default panggil dyan bray
+                const namaKamus = config.accountMapping?.[t] || (t.includes(config.ownerJid.split('@')[0]) ? 'dyan' : '');
                 return namaKamus ? `${namaKamus} (${nomorMurni})` : nomorMurni;
             }).join(', ');
             msg += `• target penerima: ${listTargetBersih}\n`;
@@ -645,7 +643,7 @@ async function checkDeadlines(sock) {
             // ====================================================================
             // KATUP AUTO-CLEAN: JIKA TARGET UTAMA SUDAH LEWAT PAS BOT OFFLINE
             // ====================================================================
-            if (Date.now() > reminder.targetTimestamp) {
+            if (Date.now() > (reminder.targetTimestamp + 2 * 60 * 1000)) {
                 idsToRemove.push(reminder.id);
                 changed = true;
                 console.log(`[auto-clean] menghapus senyap agenda "${reminder.judul}" karena sudah kedalwarsa pas bot offline bray.`);
@@ -1504,6 +1502,7 @@ Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentu
 2. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, skema alarm kustom, template pesan durasi, maupun template pesan sekarang).
 
 Aturan pengubahan parameter objek jika keputusan bernilai "edit":
+- jika user meminta menyamakan nilai parameter (misal: "template durasi samain dengan template eksekusi"), salin isi string template eksekusi yang ada di data draf saat ini ke parameter pesanDurasi.
 - Jika user meminta alarm/pengingat di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
 - Jika user mengubah judul, isi properti "judul" dengan nama agenda baru.
 - Jika user mengubah jam/waktu, isi properti "waktu" dengan format HH:MM digital.
@@ -1566,6 +1565,11 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         }
 
                         const params = updateResult.parameter_berubah || {};
+                        // MATRIKS SINKRONISASI MUTASI RAM: Mencegah terhapusnya milestones kustom bray
+                        if (params.customMilestones === null && params.intervalMinutes === null) {
+                            delete params.customMilestones;
+                            delete params.intervalMinutes;
+                        }
                         Object.keys(params).forEach(key => {
                             if (params[key] !== undefined && params[key] !== null) {
                                 state.data[key] = params[key];
