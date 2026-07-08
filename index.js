@@ -19,6 +19,7 @@ const { generateAIText, generateTagReply, parseIntentFromText, generateMimicRepl
 const userStates = {};
 const chatMemory = {};
 const groupCache = {}; // Tempat simpan memori grup biar ga diblokir server
+const targetPesanTerproses = new Set(); // Tameng pelindung ID pesan masuk
 
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -781,6 +782,22 @@ async function startBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
+        // ====================================================================
+        // TAMENG KUNCI IDEMPOTENSI: JIKA ID PESAN SUDAH PERNAH DIRESPON, BUANG!
+        // ====================================================================
+        const idPesanUnik = msg.key.id;
+        if (targetPesanTerproses.has(idPesanUnik)) {
+            console.log(`[pengaman] pesan id ${idPesanUnik} duplikat, abaikan sepihak bray.`);
+            return;
+        }
+        targetPesanTerproses.add(idPesanUnik);
+
+        // Batasi ukuran Set biar memori RAM Termux lo ga bengkak yan
+        if (targetPesanTerproses.size > 200) {
+            const kunciPertama = targetPesanTerproses.values().next().value;
+            targetPesanTerproses.delete(kunciPertama);
+        }
+        
         if (msg.message.ephemeralMessage) {
             msg.message = msg.message.ephemeralMessage.message;
         }
