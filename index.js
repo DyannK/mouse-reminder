@@ -777,6 +777,7 @@ async function startBot() {
     });
 
     sock.ev.on('messages.upsert', async (m) => {
+        if (m.type !== 'notify') return; // SEKAT PENGAMAN BIAR GA LOG MASUK TIPE APPEND/DUPLIKAT BRAY!
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
 

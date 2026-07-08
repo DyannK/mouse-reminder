@@ -1,8 +1,6 @@
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
-const { Logger } = require('telegram/extensions'); // SUNTIKKAN EKSTENSI INI BRAY
-Logger.setLevel('error'); // KUNCI MATI LOG BERISIK BIAR TERMUX GA LAG
 
 const readline = require('readline');
 const fs = require('fs');
@@ -70,6 +68,7 @@ async function initTelegramScraper(sock) {
     client = new TelegramClient(stringSession, apiId, apiHash, {
         connectionRetries: 5
     });
+    client.setLogLevel('error'); // CARA BARU DI VERSI SEKARANG BIAR LOG SAMPAH TG DIEM SEUTUHNYA YAN!
 
     console.log('Mencoba menghubungkan sesi ke akun Telegram pasif...');
     
