@@ -185,35 +185,40 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
     
     let milestones = [];
 
-    // JALUR 1: KONDISI SEKALI TEMBAK (Jika dikirim array menit spesifik, misal [5, 1])
+    // Fungsi pembantu buat menghitung mundur jam dinding secara presisi bray
+    const buatLabelJamDinamis = (menitMundur) => {
+        const waktuAlarmMs = targetDate.getTime() - (menitMundur * 60 * 1000);
+        const komponenJam = getJakartaDateComponents(new Date(waktuAlarmMs));
+        const teksJamMenit = `${String(komponenJam.hour).padStart(2, '0')}:${String(komponenJam.minute).padStart(2, '0')} WIB`;
+        return menitMundur === 0 ? `[${teksJamMenit}] sekarang` : `[${teksJamMenit}] ${menitMundur} menit lagi`;
+    };
+
     if (customMilestones && Array.isArray(customMilestones)) {
         customMilestones.forEach(min => {
             if (min <= diffMin) {
                 milestones.push({
                     type: 'durasi',
                     totalMinutes: min,
-                    label: min === 0 ? 'sekarang' : `${min} menit lagi`,
+                    label: buatLabelJamDinamis(min),
                     isAuto: min === 0
                 });
             }
         });
-        // Pastikan alarm pas waktu eksekusi (0 menit) selalu ikut mengunci sebagai penutup
         if (!milestones.some(m => m.totalMinutes === 0)) {
-            milestones.push({ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true });
+            milestones.push({ type: 'durasi', totalMinutes: 0, label: buatLabelJamDinamis(0), isAuto: true });
         }
     } else {
-        // JALUR 2: KONDISI PERULANGAN BERUNTUN (Logika lama bawaan countdown)
         let step = (intervalMin && intervalMin > 0) ? intervalMin : 0;
 
         if (diffMin <= 0 || step === 0) {
-            return [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }];
+            return [{ type: 'durasi', totalMinutes: 0, label: buatLabelJamDinamis(0), isAuto: true }];
         }
 
         for (let minRemaining = 0; minRemaining <= diffMin; minRemaining += step) {
             milestones.push({
                 type: 'durasi',
                 totalMinutes: minRemaining,
-                label: minRemaining === 0 ? 'sekarang' : `${minRemaining} menit lagi`,
+                label: buatLabelJamDinamis(minRemaining),
                 isAuto: minRemaining === 0
             });
         }
