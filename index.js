@@ -248,7 +248,7 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null) {
         `contoh: "ganti judul...", "ganti alarm...", "matikan laporan".\n\n` +
         `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
 
-    await sock.sendMessage(jid, { text: confirmationText }, { quoted: msg || quotedMsg });
+    await sock.sendMessage(jid, { text: confirmationText }, { quoted: quotedMsg });
 }
 
 function translateCronToHuman(cronPattern) {
@@ -958,46 +958,51 @@ async function startBot() {
 
         // 1. GERBANG MANUAL UTAMA (SLASH INTERCEPTOR)
         if (text.startsWith('/')) {
-            resetState(fromJid);
-            const cmd = text.trim().toLowerCase();
-            if (cmd === '/help') {
-                resetState(fromJid);
-                const menuHelp = `🛠 *PANDUAN LENGKAP PENGGUNAAN ASISTEN REMINDER BOT*\n` +
-                    `--------------------------------------------------------\n\n` +
-                    `Sistem ini dirancang buat jagain agenda personal sekaligus mantau keaktifan anggota kelompok kuliah secara otomatis bray. Berikut adalah daftar perintah yang bisa lu gunain:\n\n` +
-                    `📌 *1. PENGELOLAAN AGENDA RUTIN BERULANG*\n` +
-                    `Perintah ini digunain buat bikin alarm pengingat yang bakal bunyi terus secara konsisten mengikuti pola waktu tertentu bray.\n` +
-                    `• *Cara Kasual*: Bicara santai lewat chat, misal: "bot buatin jadwal rutin jam 07:00 buat kuliah elka"\n` +
-                    `• *Cara Kaku*: \`/tambah [menit] [jam] [tanggal] [bulan] [hari] | [pesan pengingat]\`\n` +
-                    `• *Contoh*: \`/tambah 0 7 * * * | bangun bray kuliah elka malem\`\n\n` +
-                    `📌 *2. PENGELOLAAN TENGGAT WAKTU TUGAS KULIAH*\n` +
-                    `Perintah ini dipake buat bikin target satu kali eksekusi tugas kelompok yang butuh hitung mundur dinamis bray.\n` +
-                    `• *Cara Kasual*: Bicara santai lewat chat, misal: "bot tolong ingetin ada tugas pengkondisian sinyal besok jam 10:00"\n` +
-                    `• *Cara Kaku*: \`/tambahdeadline [tanggal-bulan-tahun jam:menit] | [judul tugas] | [tangga alarm]\`\n` +
-                    `• *Contoh*: \`/tambahdeadline 08-07-2026 13:00 | kuis power electronics | 1hari,2jam,15menit\`\n\n` +
-                    `📌 *3. INTEGRASI PENGERUKAN INFORMASI TELEGRAM*\n` +
-                    `Lu bisa ngintip informasi pengumuman penting dari Telegram dan meneruskannya langsung ke grup WhatsApp sirkel lu bray.\n` +
-                    `• */tglist [nama_grup]* : Mengintip 10 daftar isi percakapan terakhir di grup Telegram sasaran bray.\n` +
-                    `• */tgforward [nama_grup] [nomor_id_pesan]* : Meneruskan secara resmi pesan pilihan dari Telegram ke grup WhatsApp dalam resolusi tinggi asli tanpa kompresi burik bray.\n\n` +
-                    `📌 *4. MANAJEMEN ARSIP LAPORAN KELOMPOK*\n` +
-                    `• */listlaporan* : Menampilkan semua daftar arsip laporan kelompok bray.\n` +
-                    `• */detaillaporan [id_arsip]* : Membongkar isi teks laporan keaktifan secara utuh bray.\n` +
-                    `• */hapuslaporan [id_arsip]* : Menghapus berkas arsip lama bray.\n\n` +
-                    `📌 *5. MODIFIKASI PARAMETER PAS PROSES KONFIRMASI DRAF*\n` +
-                    `Pas draf pratinjau muncul di chat, lu bisa ketik kalimat santai berikut buat ngubah settingan parameter agenda sebelum disimpan bray:\n` +
-                    `• *ganti judul jadi...* : Mengubah nama aktivitas agenda bray.\n` +
-                    `• *ganti waktu jadi...* : Mengubah jam target operasi bray.\n` +
-                    `• *matikan pelacakan* : Mengubah agenda jadi ramah tanpa perlu neror chat pribadi bray.\n` +
-                    `• *matikan laporan* : Mengunci bot agar tidak mengirim draf laporan keaktifan ke grup bray.\n\n` +
-                    `📌 *6. PENGENALAN IDENTITAS & KAMUS NOMOR KELOMPOK*\n` +
-                    `Biar bot pinter manggil nama asli anak-anak kelompok pas nerbitin laporan atau interogasi chat pribadi, daftarin nama panggilan lu pake cara ini bray:\n` +
-                    `• *Cara Kasual Mandiri*: Ketik di chat: "panggil gue [nama_panggilan_lu]"\n` +
-                    `• *Cara Kaku Mandiri*: Ketik perintah: \`/panggilgue [nama_panggilan_lu]\`\n` +
-                    `• *Cara Kasual Owner*: Khusus dyan buat daftarin nomor temen sepihak: "daftarin [nomor_hp] sebagai [nama_panggilan]"\n` +
-                    `• *Cara Kaku Owner*: Khusus dyan mendaftarkan nomor lewat command: \`/daftarin [nomor_hp] [nama_panggilan]\``;
+            const checkCmd = text.trim().toLowerCase().split(/\s+/)[0];
+            const isLocalDrafCmd = userStates[fromJid]?.mode === 'confirm_schedule' && ['/judul', '/waktu', '/jam', '/alarm', '/pengingat'].includes(checkCmd);
 
-                await sock.sendMessage(fromJid, { text: menuHelp }, { quoted: msg });
-                return;
+            if (!isLocalDrafCmd) {
+                resetState(fromJid);
+                const cmd = text.trim().toLowerCase();
+                if (cmd === '/help') {
+                    resetState(fromJid);
+                    const menuHelp = `🛠 *PANDUAN LENGKAP PENGGUNAAN ASISTEN REMINDER BOT*\n` +
+                        `--------------------------------------------------------\n\n` +
+                        `Sistem ini dirancang buat jagain agenda personal sekaligus mantau keaktifan anggota kelompok kuliah secara otomatis bray. Berikut adalah daftar perintah yang bisa lu gunain:\n\n` +
+                        `📌 *1. PENGELOLAAN AGENDA RUTIN BERULANG*\n` +
+                        `Perintah ini digunain buat bikin alarm pengingat yang bakal bunyi terus secara konsisten mengikuti pola waktu tertentu bray.\n` +
+                        `• *Cara Kasual*: Bicara santai lewat chat, misal: "bot buatin jadwal rutin jam 07:00 buat kuliah elka"\n` +
+                        `• *Cara Kaku*: \`/tambah [menit] [jam] [tanggal] [bulan] [hari] | [pesan pengingat]\`\n` +
+                        `• *Contoh*: \`/tambah 0 7 * * * | bangun bray kuliah elka malem\`\n\n` +
+                        `📌 *2. PENGELOLAAN TENGGAT WAKTU TUGAS KULIAH*\n` +
+                        `Perintah ini dipake buat bikin target satu kali eksekusi tugas kelompok yang butuh hitung mundur dinamis bray.\n` +
+                        `• *Cara Kasual*: Bicara santai lewat chat, misal: "bot tolong ingetin ada tugas pengkondisian sinyal besok jam 10:00"\n` +
+                        `• *Cara Kaku*: \`/tambahdeadline [tanggal-bulan-tahun jam:menit] | [judul tugas] | [tangga alarm]\`\n` +
+                        `• *Contoh*: \`/tambahdeadline 08-07-2026 13:00 | kuis power electronics | 1hari,2jam,15menit\`\n\n` +
+                        `📌 *3. INTEGRASI PENGERUKAN INFORMASI TELEGRAM*\n` +
+                        `Lu bisa ngintip informasi pengumuman penting dari Telegram dan meneruskannya langsung ke grup WhatsApp sirkel lu bray.\n` +
+                        `• */tglist [nama_grup]* : Mengintip 10 daftar isi percakapan terakhir di grup Telegram sasaran bray.\n` +
+                        `• */tgforward [nama_grup] [nomor_id_pesan]* : Meneruskan secara resmi pesan pilihan dari Telegram ke grup WhatsApp dalam resolusi tinggi asli tanpa kompresi burik bray.\n\n` +
+                        `📌 *4. MANAJEMEN ARSIP LAPORAN KELOMPOK*\n` +
+                        `• */listlaporan* : Menampilkan semua daftar arsip laporan kelompok bray.\n` +
+                        `• */detaillaporan [id_arsip]* : Membongkar isi teks laporan keaktifan secara utuh bray.\n` +
+                        `• */hapuslaporan [id_arsip]* : Menghapus berkas arsip lama bray.\n\n` +
+                        `📌 *5. MODIFIKASI PARAMETER PAS PROSES KONFIRMASI DRAF*\n` +
+                        `Pas draf pratinjau muncul di chat, lu bisa ketik kalimat santai berikut buat ngubah settingan parameter agenda sebelum disimpan bray:\n` +
+                        `• *ganti judul jadi...* : Mengubah nama aktivitas agenda bray.\n` +
+                        `• *ganti waktu jadi...* : Mengubah jam target operasi bray.\n` +
+                        `• *matikan pelacakan* : Mengubah agenda jadi ramah tanpa perlu neror chat pribadi bray.\n` +
+                        `• *matikan laporan* : Mengunci bot agar tidak mengirim draf laporan keaktifan ke grup bray.\n\n` +
+                        `📌 *6. PENGENALAN IDENTITAS & KAMUS NOMOR KELOMPOK*\n` +
+                        `Biar bot pinter manggil nama asli anak-anak kelompok pas nerbitin laporan atau interogasi chat pribadi, daftarin nama panggilan lu pake cara ini bray:\n` +
+                        `• *Cara Kasual Mandiri*: Ketik di chat: "panggil gue [nama_panggilan_lu]"\n` +
+                        `• *Cara Kaku Mandiri*: Ketik perintah: \`/panggilgue [nama_panggilan_lu]\`\n` +
+                        `• *Cara Kasual Owner*: Khusus dyan buat daftarin nomor temen sepihak: "daftarin [nomor_hp] sebagai [nama_panggilan]"\n` +
+                        `• *Cara Kaku Owner*: Khusus dyan mendaftarkan nomor lewat command: \`/daftarin [nomor_hp] [nama_panggilan]\``;
+
+                    await sock.sendMessage(fromJid, { text: menuHelp }, { quoted: msg });
+                    return;
+                }
             }
             if (cmd === '/listdetail') {
                 await handleListDetail(sock, fromJid);
@@ -1219,96 +1224,129 @@ async function startBot() {
         }
 
         // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
-        // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
             // JIKA DI GRUP DAN LU GA NGETAG BOT, BIARKAN CHAT LEWAT JANGAN DIINTERCEPT YAN!
             if (isGroup && !isBotMentioned) {
                 // Biarkan lolos ke logger grup bawah
             } else {
                 const state = userStates[fromJid];
-                
-                // LAPIS 1: JALUR CEPAT INSTAN (Merespon dalam hitungan milidetik jika ketikan lo adalah pengunci)
-                const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
-                
-                if (isYes) {
-                    const data = state.data;
-                    let targetTimestamp = Date.now();
                     
-                    if (data.waktu && data.waktu.includes(':')) {
-                        const [hour, minute] = data.waktu.split(':').map(Number);
-                        const now = new Date();
-                        const tParts = getJakartaDateComponents(now);
-                        
-                        let targetDate = new Date(`${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`);
-                        if (targetDate.getTime() <= now.getTime()) {
-                            targetDate.setDate(targetDate.getDate() + 1);
+                    // ====================================================================
+                    // LAPIS 1: DETEKSI PERINTAH BAKU SLASH LOKAL (MUTLAK & INSTAN)
+                    // ====================================================================
+                    if (text.startsWith('/')) {
+                        const args = text.slice(1).trim().split(/\s+/);
+                        const subCmd = args[0].toLowerCase();
+                        const restText = args.slice(1).join(' ').trim();
+
+                        if (subCmd === 'judul') {
+                            if (restText) state.data.judul = restText;
+                            await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                            return;
                         }
-                        targetTimestamp = targetDate.getTime();
+                        if (subCmd === 'waktu' || subCmd === 'jam') {
+                            const foundTime = restText.match(/\d{2}:\d{2}/)?.[0];
+                            if (foundTime) state.data.waktu = foundTime;
+                            await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                            return;
+                        }
+                        if (subCmd === 'alarm' || subCmd === 'pengingat') {
+                            const matches = restText.match(/\d+/g);
+                            if (matches) {
+                                state.data.customMilestones = matches.map(Number).sort((a, b) => b - a);
+                                state.data.intervalMinutes = null;
+                            }
+                            await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                            return;
+                        }
                     }
 
-                    const intervalVal = data.intervalMinutes || 1;
-                    const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
-
-                    let targetJidsFinal = [fromJid];
-                    let finalScope = isGroup ? 'group' : 'personal';
+                    // ====================================================================
+                    // LAPIS 2: JALUR CEPAT TOMBOL PENGUNCI JADWAL (MILIDETIK)
+                    // ====================================================================
+                    const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
                     
-                    if (data.extractedTarget) {
-                        const cleanTargetStr = data.extractedTarget.toLowerCase();
-                        const mappedJids = [];
+                    if (isYes) {
+                        const data = state.data;
+                        let targetTimestamp = Date.now();
                         
-                        Object.entries(config.accountMapping || {}).forEach(([jid, name]) => {
-                            if (cleanTargetStr.includes(name.toLowerCase())) {
-                                mappedJids.push(jid);
+                        if (data.waktu && data.waktu.includes(':')) {
+                            const [hour, minute] = data.waktu.split(':').map(Number);
+                            const now = new Date();
+                            const tParts = getJakartaDateComponents(now);
+                            
+                            let targetDate = new Date(`${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`);
+                            if (targetDate.getTime() <= now.getTime()) {
+                                targetDate.setDate(targetDate.getDate() + 1);
                             }
+                            targetTimestamp = targetDate.getTime();
+                        }
+
+                        const intervalVal = data.intervalMinutes || 1;
+                        const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
+
+                        let targetJidsFinal = [fromJid];
+                        let finalScope = isGroup ? 'group' : 'personal';
+                        
+                        if (data.extractedTarget) {
+                            const cleanTargetStr = data.extractedTarget.toLowerCase();
+                            const mappedJids = [];
+                            
+                            Object.entries(config.accountMapping || {}).forEach(([jid, name]) => {
+                                if (cleanTargetStr.includes(name.toLowerCase())) {
+                                    mappedJids.push(jid);
+                                }
+                            });
+
+                            if (mappedJids.length > 0) {
+                                targetJidsFinal = mappedJids;
+                                finalScope = 'tertarget'; 
+                            } else {
+                                const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
+                                if (foundContact) {
+                                    targetJidsFinal = [foundContact.jid];
+                                    finalScope = 'personal';
+                                }
+                            }
+                        }
+
+                        config.reminders.push({
+                            id: `ai_${Date.now().toString().slice(-4)}`,
+                            type: 'deadline',
+                            scope: finalScope,
+                            targetTimestamp: targetTimestamp,
+                            judul: data.judul || 'agenda kasual',
+                            message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
+                            manualFallback: data.judul || 'agenda kasual',
+                            nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
+                            nowManualFallback: data.judul || 'agenda kasual',
+                            milestones: finalMilestones,
+                            customMilestones: data.customMilestones || null,
+                            firedMilestones: [],
+                            pendingAITexts: {},
+                            targets: finalScope === 'group' ? ['group'] : targetJidsFinal, 
+                            mediaPath: null,
+                            mediaType: null,
+                            teamTracking: {},
+                            creator: data.creator || 'dyan',       
+                            creatorJid: data.creatorJid || '',
+                            withTracking: data.withTracking !== false,
+                            withReport: data.withReport !== false
                         });
 
-                        if (mappedJids.length > 0) {
-                            targetJidsFinal = mappedJids;
-                            finalScope = 'tertarget'; 
-                        } else {
-                            const foundContact = config.contacts.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
-                            if (foundContact) {
-                                targetJidsFinal = [foundContact.jid];
-                                finalScope = 'personal';
-                            }
-                        }
+                        config.reports = config.reports || [];
+                        saveConfig(config);
+                        resetState(fromJid);
+                        setupSchedules(sock);
+                        
+                        await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}` });
+                        return;
                     }
 
-                    config.reminders.push({
-                        id: `ai_${Date.now().toString().slice(-4)}`,
-                        type: 'deadline',
-                        scope: finalScope,
-                        targetTimestamp: targetTimestamp,
-                        judul: data.judul || 'agenda kasual',
-                        message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
-                        manualFallback: data.judul || 'agenda kasual',
-                        nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
-                        nowManualFallback: data.judul || 'agenda kasual',
-                        milestones: finalMilestones,
-                        customMilestones: data.customMilestones || null, // Kunci skema kustom di database berkas lo yan bray
-                        firedMilestones: [],
-                        pendingAITexts: {},
-                        targets: finalScope === 'group' ? ['group'] : targetJidsFinal, 
-                        mediaPath: null,
-                        mediaType: null,
-                        teamTracking: {},
-                        creator: data.creator || 'dyan',       
-                        creatorJid: data.creatorJid || '',
-                        withTracking: data.withTracking !== false,
-                        withReport: data.withReport !== false
-                    });
-
-                    config.reports = config.reports || [];
-                    saveConfig(config);
-                    resetState(fromJid);
-                    setupSchedules(sock);
-                    
-                    await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}` });
-                    return;
-                }
-
-                // LAPIS 2: JALUR CERDAS AI (Mencerna kalimat pembatalan kustom dan koreksi parameter sebebas mungkin bray)
-                const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
+                    // ====================================================================
+                    // LAPIS 3: JALUR CERDAS INTERPRETASI KETIKAN KASUAL MANUSIA (AI BASIS)
+                    // ====================================================================
+                    const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
 Data draf saat ini: ${JSON.stringify(state.data)}
 User membalas dengan ketikan bebas: "${text}"
 
@@ -1318,61 +1356,59 @@ Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentu
 3. "chat": Jika ketikan user di luar konteks pembatalan atau perbaikan draf (hanya basa-basi santai). Kalimat balasan berupa ketikan santai tongkrongan lowercase.
 
 Aturan pengubahan parameter objek jika keputusan bernilai "edit":
-- Jika user meminta alarm/pengingat di menit-menit tertentu (misal: di 20 menit, 10 menit, 5 menit, dan 3 menit terakhir), ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
+- Jika user meminta alarm/pengingat di menit-menit tertentu (misal: di 30 menit, 20 menit, 10 menit, 5 menit, 3 menit, dan 1 menit terakhir), ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
 - Jika user mengubah judul, isi properti "judul" dengan nama agenda baru yang bersih dari kata sampah pengetikan (seperti "ganti", "deh", "jadi", "judulnya").
 - Jika user mengubah jam/waktu, isi properti "waktu" dengan format HH:MM digital.
-- Jika ada parameter lain yang mau diubah (seperti matikan pelacakan dll), biarkan Gemini menyesuaikannya di properti tambahan jika perlu.
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
   "keputusan": "edit" | "batal" | "chat",
   "parameter_berubah": {
-    "judul": "string atau null",
-    "waktu": "string atau null",
-    "customMilestones": [array atau null],
-    "intervalMinutes": 1
+    "judul": string atau null,
+    "waktu": string atau null,
+    "customMilestones": array atau null,
+    "intervalMinutes": number atau null
   },
-  "balasan_chatan": "string atau null"
+  "balasan_chatan": string atau null
 }`;
 
-                try {
-                    const { generateAIText } = require('./geminiClient');
-                    const aiRes = await generateAIText(promptDinamisAI, {}, '', '{}', false);
-                    const cleanJsonStr = aiRes.text.replace(/```json|```/gi, '').trim();
-                    const updateResult = JSON.parse(cleanJsonStr);
+                    try {
+                        const { generateAIText } = require('./geminiClient');
+                        const aiRes = await generateAIText(promptDinamisAI, {}, '', '{}', false);
+                        const cleanJsonStr = aiRes.text.replace(/```json|```/gi, '').trim();
+                        const updateResult = JSON.parse(cleanJsonStr);
 
-                    if (updateResult.keputusan === 'batal') {
-                        resetState(fromJid);
-                        const teksBatal = updateResult.balasan_chatan || `oke siap bray, draf agenda resmi gue apus dari memori ya wkwk`;
-                        await sock.sendMessage(fromJid, { text: teksBatal.toLowerCase() }, { quoted: msg });
-                        return;
+                        if (updateResult.keputusan === 'batal') {
+                            resetState(fromJid);
+                            const teksBatal = updateResult.balasan_chatan || `oke siap bray, draf agenda resmi gue apus dari memori ya wkwk`;
+                            await sock.sendMessage(fromJid, { text: teksBatal.toLowerCase() }, { quoted: msg });
+                            return;
+                        }
+
+                        if (updateResult.keputusan === 'edit') {
+                            const params = updateResult.parameter_berubah || {};
+                            Object.keys(params).forEach(key => {
+                                if (params[key] !== undefined && params[key] !== null) {
+                                    state.data[key] = params[key];
+                                } else if (params[key] === null && (key === 'intervalMinutes' || key === 'customMilestones')) {
+                                    state.data[key] = null; 
+                                }
+                            });
+                            await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                            return;
+                        }
+
+                        if (updateResult.keputusan === 'chat') {
+                            const teksChat = updateResult.balasan_chatan || `mau lanjut chatan aja atau draf agenda "${state.data.judul}" nya mau disimpen nih bray?`;
+                            await sock.sendMessage(fromJid, { text: teksChat.toLowerCase() }, { quoted: msg });
+                            return;
+                        }
+
+                    } catch (err) {
+                        console.error('gagal parsing keputusan draf AI:', err.message);
+                        await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, draf agenda "${state.data.judul}" mau lu simpen (ketik iya), lu edit parameter, atau mau dibatalin nih?` }, { quoted: msg });
                     }
-
-                    if (updateResult.keputusan === 'edit') {
-                        const params = updateResult.parameter_berubah || {};
-                        Object.keys(params).forEach(key => {
-                            if (params[key] !== undefined && params[key] !== null) {
-                                state.data[key] = params[key];
-                            } else if (params[key] === null && (key === 'intervalMinutes' || key === 'customMilestones')) {
-                                state.data[key] = null; // Sinkronisasi katup kosong bray
-                            }
-                        });
-                        // Cetak draf teranyar hasil rakitan kecerdasan buatan bray
-                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                        return;
-                    }
-
-                    if (updateResult.keputusan === 'chat') {
-                        const teksChat = updateResult.balasan_chatan || `mau lanjut chatan aja atau draf agenda "${state.data.judul}" nya mau disimpen nih bray?`;
-                        await sock.sendMessage(fromJid, { text: teksChat.toLowerCase() }, { quoted: msg });
-                        return;
-                    }
-
-                } catch (err) {
-                    console.error('gagal parsing keputusan draf AI:', err.message);
-                    await sock.sendMessage(fromJid, { text: `maksud lu gimana yan, draf agenda "${state.data.judul}" mau lu simpen (ketik iya), lu edit parameter, atau mau dibatalin nih?` }, { quoted: msg });
                 }
-            }
             return;
         }
 
