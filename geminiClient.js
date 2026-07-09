@@ -171,18 +171,22 @@ pilihan intent:
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
 aturan ekstraksi parameter untuk "create_schedule":
+- DETERMINASI TIPE AGENDA: analisa apakah kalimat bernilai sekali tayang (deadline/tugas) atau rutin berulang (rutinitas/jadwal kuliah mingguan/setiap hari). isi properti "type" dengan string murni "deadline" atau "recurring".
+- GENERASI CRON PATTERN: jika properti "type" bernilai "recurring", kamu WAJIB menyusun pola format linux cron 5 digit (menit jam tanggal bulan hari) di properti "cronPattern" berdasarkan kata kasual rutin pengguna (misal: "tiap menit" -> "* * * * *", "tiap jam 7 pagi" -> "0 7 * * *", "tiap hari selasa jam 08:00" -> "0 8 * * 2", "tiap senin-jumat jam 13:00" -> "0 13 * * 1-5"). jika tipenya "deadline", isi "cronPattern" dengan null.
 - jika user menyebutkan rentetan menit pengingat spesifik (misal: "pengingat di 30 menit, 20 menit..."), ambil seluruh angka menit tersebut, susun menjadi array/larik angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
 - jika user meminta alarm berbasis interval rutin atau setiap menit (misal: "skema alarm diganti jadi permenit", "interval 5 menit"), kamu WAJIB mengisi properti "intervalMinutes" dengan angka menit tersebut, dan WAJIB memberikan nilai null pada properti "customMilestones" bray!
 - jika user menyebutkan kata pembatalan laporan, set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
 - jika user merujuk ke diri sendiri, kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". 
-- jika merujuk ke nama kontak atau nama orang lain, baru isi properti "extractedTarget" dengan nama orang tersebut.
+- jika merujuk ke nama kontak atau nama orang lain, baru isi properti "extractedTarget" with nama orang tersebut.
 - properti "startTime" WAJIB kamu isi null, KECUALI jika pengguna secara eksplisit menyebutkan jam mulai hitung mundur di dalam chatnya (misal: "mulai dari jam 12:00"). Jangan pernah menyamakan atau mengisi nilai "startTime" dengan jam sasaran deadline atau waktu aktivitas!
-- PERINGATAN GABUNGAN TEMPLATE: jika user mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat (misal: "template durasi dan eksekusi nya gini..."), kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string yang sama bray!
+- PERINGATAN GABUNGAN TEMPLATE: jika user mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat, kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string yang sama bray!
 - PERINGATAN STRUKTUR STRING LITERAL: jika teks template yang dimasukkan user mengandung kata "AI:", teks "AI:" tersebut wajib dimasukkan utuh sebagai bagian dari isi string literal pesanDurasi atau pesanNow, jangan pernah dipotong atau dibuang bray!
 
 format output json murni:
 {
   "intent": "create_schedule" | "chat",
+  "type": "deadline" | "recurring",
+  "cronPattern": "string atau null",
   "judul": "string atau null",
   "waktu": "string format HH:MM atau null",
   "intervalMinutes": number atau null,

@@ -793,25 +793,42 @@ async function checkDeadlines(sock) {
 }
 
 function setupSchedules(sock) {
-    scheduledTasks.forEach(task => task.stop());
-    scheduledTasks = [];
-    const config = loadConfig();
-
     config.reminders.forEach((reminder) => {
         if (reminder.type === 'deadline') return;
+        
+        // EKSEKUSI PEMICU POLA CRON BERKALA KULIAH LU YAN
         const task = cron.schedule(reminder.cronPattern, () => {
             setTimeout(async () => {
+                const freshConfig = loadConfig();
+                
+                // JALUR SPEKTAKULER: AKTIFKAN INTEROGASI ABSEN TIM JIKA SCOPE KELOMPOK AKTIF BRAY
+                if ((reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withTracking !== false) {
+                    const mockMilestoneNow = { label: 'waktu utama', isAuto: true, totalMinutes: 0 };
+                    await handleGroupTeamDistribution(sock, reminder, mockMilestoneNow, freshConfig);
+                    
+                    if (reminder.withReport !== false) {
+                        setTimeout(async () => {
+                            const reportConfig = loadConfig();
+                            const currentFreshReminder = reportConfig.reminders.find(r => r.id === reminder.id) || reminder;
+                            await generateAndSendTeamReport(sock, currentFreshReminder, reportConfig);
+                        }, 5 * 60 * 1000); // Kirim rangkuman absen ke grup 5 menit pasca-kuliah mulai bray
+                    }
+                }
+
+                // KIRIM NOTIFIKASI PENGINGAT UTAMA SEPERTI BIASA
                 const targetJids = (reminder.targets || ['group']).map(t => {
-                    if (t === 'group') return config.groupJid;
-                    if (t === 'personal') return config.ownerJid;
+                    if (t === 'group') return freshConfig.groupJid;
+                    if (t === 'personal') return freshConfig.ownerJid;
                     return t;
                 }).filter(Boolean);
 
                 const targetTextMap = {};
                 for (const jid of targetJids) {
-                    targetTextMap[jid] = (await resolveTemplateForJid(reminder.message, reminder.manualFallback, jid, {}, reminder.formal)).text;
+                    const context = { sisa: 'sekarang', judul: reminder.judul, isNow: true };
+                    targetTextMap[jid] = (await resolveTemplateForJid(reminder.message, reminder.manualFallback, jid, context, reminder.formal)).text;
                 }
                 await deliverToJids(sock, reminder, targetTextMap);
+                
             }, Math.random() * (reminder.jitterSeconds ?? 15) * 1000);
         }, { timezone: 'Asia/Jakarta' });
         scheduledTasks.push(task);
@@ -1427,7 +1444,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 // LAPIS 2: JALUR CEPAT TOMBOL PENGUNCI JADWAL (MILIDETIK)
                 // ====================================================================
                 const hasEditKeywords = ['ganti', 'ubah', 'template', 'pesan', 'alarm', 'skema', 'durasi', 'eksekusi', 'jam', 'waktu', 'judul', 'samain', 'kaya', 'jadi', 'dibikin', 'interval', 'permenit', 'menit'].some(w => lowText.includes(w));
-                const isYes = !hasEditKeywords && (/\b(iya|ya|yoi|fix|save|simpan|iye|iyee|sip|sipp|sippp|wokee|woke|yow|yowes|yoww})\b/i.test(lowText) || lowText === 'y' || lowText === 'iya gitu');
+                const isYes = !hasEditKeywords && (/\b(yes|yess|yesss|betul|betuul|betull|betulll|iya|ya|yoi|fix|save|simpan|iye|iyee|sip|sipp|sippp|wokee|woke|yow|yowes|yoww|oke|okee|okeee|okay|okaay|okaaay|})\b/i.test(lowText) || lowText === 'y' || lowText === 'iya gitu');
                 
                 if (isYes) {
                     const data = state.data; 
@@ -1479,16 +1496,17 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
 
                     config.reminders.push({
-                        id: `ai_${Date.now().toString().slice(-4)}`,
-                        type: 'deadline',
+                        id: data.type === 'recurring' ? `rec_${Date.now().toString().slice(-4)}` : `ai_${Date.now().toString().slice(-4)}`,
+                        type: data.type || 'deadline', // SEKARANG DINAMIS MENGIKUTI ZIP DATA AI BRAY
                         scope: finalScope,
-                        targetTimestamp: targetTimestamp,
+                        targetTimestamp: data.type === 'recurring' ? null : targetTimestamp,
+                        cronPattern: data.cronPattern || null, // KUNCI POLA CRON MINGGUAN KULIAH LU YAN
                         judul: data.judul || 'agenda kasual',
                         message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
                         manualFallback: data.judul || 'agenda kasual',
                         nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
                         nowManualFallback: data.judul || 'agenda kasual',
-                        milestones: finalMilestones,
+                        milestones: data.type === 'recurring' ? null : finalMilestones,
                         customMilestones: data.customMilestones || null,
                         firedMilestones: [],
                         pendingAITexts: {},
@@ -1541,6 +1559,7 @@ Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
 - Jika user meminta memindahkan, menukar, atau menggeser posisi marka (misal: "AI: di template durasi dan eksekusi di tuker ke depan"), kamu WAJIB menyusun ulang seluruh string template tersebut dari awal dengan meletakkan kata "AI: " di posisi paling awal string pesanDurasi dan pesanNow bray!
 - Jika user mengubah skema alarm menjadi interval rutin atau permenit, kamu WAJIB memaksa nilai properti "startTime" di objek draf ini menjadi null bray, agar hitungan matematika selisih jamnya tidak rusak kembali ke 0.
+- Jika user mengubah pola pengulangan rutin (misal: "ubah jadwalnya jadi tiap hari jumat jam 09:00"), kamu WAJIB memperbarui properti "type" menjadi "recurring" dan buatkan susunan format linux cron 5 digit terbaru di properti "cronPattern" secara akurat bray!
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
