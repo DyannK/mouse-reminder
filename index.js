@@ -1458,8 +1458,12 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         const now = new Date();
                         const tParts = getJakartaDateComponents(now);
                         
-                        let targetDate = new Date(`${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`);
-                        if (targetDate.getTime() <= now.getTime()) {
+                        // JANGKAR BARU: Gunakan tanggal absolut dari data AI jika ada bray!
+                        const targetTgl = data.tanggal || `${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}`;
+                        let targetDate = new Date(`${targetTgl}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`);
+                        
+                        // Katup pengaman bawaan lama hanya bekerja jika user tidak menset tanggal kalender spesifik bray
+                        if (!data.tanggal && targetDate.getTime() <= now.getTime()) {
                             targetDate.setDate(targetDate.getDate() + 1);
                         }
                         targetTimestamp = targetDate.getTime();
@@ -1562,6 +1566,8 @@ Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - Jika user meminta memindahkan, menukar, atau menggeser posisi marka (misal: "AI: di template durasi dan eksekusi di tuker ke depan"), kamu WAJIB menyusun ulang seluruh string template tersebut dari awal dengan meletakkan kata "AI: " di posisi paling awal string pesanDurasi dan pesanNow bray!
 - Jika user mengubah skema alarm menjadi interval rutin atau permenit, kamu WAJIB memaksa nilai properti "startTime" di objek draf ini menjadi null bray, agar hitungan matematika selisih jamnya tidak rusak kembali ke 0.
 - Jika user mengubah pola pengulangan rutin (misal: "ubah jadwalnya jadi tiap hari jumat jam 09:00"), kamu WAJIB memperbarui properti "type" menjadi "recurring" dan buatkan susunan format linux cron 5 digit terbaru di properti "cronPattern" secara akurat bray!
+- Jika user merevisi waktu alarm di hari terakhir menggunakan jam dinding kaku (misal: "di hari terakhir ingetin jam 8 pagi dan 9 malam"), kamu WAJIB menghitung selisih menit mundur dari jam alarm tersebut menuju jam target utama agenda saat ini, lalu masukkan hasilnya berupa array angka menit mundur ke dalam properti "customMilestones" bray!
+
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
