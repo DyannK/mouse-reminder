@@ -176,6 +176,7 @@ aturan ekstraksi parameter untuk "create_schedule":
 - jika user menyebutkan kata pembatalan laporan, set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
 - jika user merujuk ke diri sendiri, kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". 
 - jika merujuk ke nama kontak atau nama orang lain, baru isi properti "extractedTarget" dengan nama orang tersebut.
+- properti "startTime" WAJIB kamu isi null, KECUALI jika pengguna secara eksplisit menyebutkan jam mulai hitung mundur di dalam chatnya (misal: "mulai dari jam 12:00"). Jangan pernah menyamakan atau mengisi nilai "startTime" dengan jam sasaran deadline atau waktu aktivitas!
 - PERINGATAN GABUNGAN TEMPLATE: jika user mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat (misal: "template durasi dan eksekusi nya gini..."), kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string yang sama bray!
 - PERINGATAN STRUKTUR STRING LITERAL: jika teks template yang dimasukkan user mengandung kata "AI:", teks "AI:" tersebut wajib dimasukkan utuh sebagai bagian dari isi string literal pesanDurasi atau pesanNow, jangan pernah dipotong atau dibuang bray!
 

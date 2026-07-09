@@ -1427,7 +1427,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 // LAPIS 2: JALUR CEPAT TOMBOL PENGUNCI JADWAL (MILIDETIK)
                 // ====================================================================
                 const hasEditKeywords = ['ganti', 'ubah', 'template', 'pesan', 'alarm', 'skema', 'durasi', 'eksekusi', 'jam', 'waktu', 'judul', 'samain', 'kaya', 'jadi', 'dibikin', 'interval', 'permenit', 'menit'].some(w => lowText.includes(w));
-                const isYes = !hasEditKeywords && (/\b(iya|ya|yoi|fix|save|simpan|iye|iyee|sip|sipp|sippp)\b/i.test(lowText) || lowText === 'y' || lowText === 'iya gitu');
+                const isYes = !hasEditKeywords && (/\b(iya|ya|yoi|fix|save|simpan|iye|iyee|sip|sipp|sippp|wokee|woke|yow|yowes|yoww})\b/i.test(lowText) || lowText === 'y' || lowText === 'iya gitu');
                 
                 if (isYes) {
                     const data = state.data; 
@@ -1539,6 +1539,8 @@ Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - jika user meminta mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat (misal: "template durasi dan eksekusi nya gini..."), kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string teks yang sama tersebut bray!
 - jika user memasukkan kata "AI:" di dalam teks template barunya, isi teks "AI:" tersebut adalah string literal mutlak yang wajib lu pertahankan utuh di dalam properti pesanDurasi atau pesanNow, jangan pernah dipotong!
 - jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
+- Jika user meminta memindahkan, menukar, atau menggeser posisi marka (misal: "AI: di template durasi dan eksekusi di tuker ke depan"), kamu WAJIB menyusun ulang seluruh string template tersebut dari awal dengan meletakkan kata "AI: " di posisi paling awal string pesanDurasi dan pesanNow bray!
+- Jika user mengubah skema alarm menjadi interval rutin atau permenit, kamu WAJIB memaksa nilai properti "startTime" di objek draf ini menjadi null bray, agar hitungan matematika selisih jamnya tidak rusak kembali ke 0.
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
