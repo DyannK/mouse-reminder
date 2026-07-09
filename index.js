@@ -224,18 +224,37 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
     return milestones.sort((a, b) => b.totalMinutes - a.totalMinutes);
 }
 
-async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null) {
-    let targetText = data.extractedTarget ? `nomor pribadi ${data.extractedTarget}` : 'kelompok di grup ini';
+async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debugInfo = null) {
+    const config = loadConfig();
+    let targetText = 'kelompok di grup ini';
+    
+    if (data.extractedTarget) {
+        if (data.extractedTarget === 'sender') {
+            targetText = `dyan (${jid.split('@')[0]})`;
+        } else {
+            targetText = data.extractedTarget;
+        }
+    }
     
     const intervalVal = data.intervalMinutes || 1;
-    // Oper data customMilestones ke dalam mesin kalkulator bawaan berkas lo yan bray
     const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
 
     let skemaText = data.customMilestones 
         ? `kustom pada menit ke [${data.customMilestones.join(', ')}] terakhir sebelum mulai` 
         : `${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)`;
 
-    let confirmationText = `📋 *[konfirmasi agenda]*\n` +
+    // GELEMBUNG LOGGING DEBUG LIVE UNTUK MEMANTAU JALUR BACKEND
+    let debugHeaderTeks = '';
+    if (debugInfo) {
+        debugHeaderTeks = `⚙️ *[LOGGING DEBUG BACKEND]*\n` +
+                          `• input teks: "${debugInfo.inputText}"\n` +
+                          `• keputusan ai: ${debugInfo.keputusan}\n` +
+                          `• payload json ai: ${debugInfo.rawPayload}\n` +
+                          `-------------------------------------------\n\n`;
+    }
+
+    let confirmationText = debugHeaderTeks + 
+        `📋 *[konfirmasi agenda]*\n` +
         `• *judul aktivitas*: ${data.judul || 'agenda kasual'}\n` +
         `• *pembuat agenda*: ${data.creator || 'tidak dikenal'} (${data.creatorJid || 'tidak ada nomor'})\n` +
         `• *waktu sasaran*: jam ${data.waktu || 'belum diset'} wib\n` +
@@ -1407,10 +1426,11 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 // ====================================================================
                 // LAPIS 2: JALUR CEPAT TOMBOL PENGUNCI JADWAL (MILIDETIK)
                 // ====================================================================
-                const isYes = /\b(iya|ya|yoi|oke|ok|y|buat|fix|gas|bisa|iye|iyee|yee)\b/i.test(lowText) || lowText.includes('iya') || lowText.includes('iye') || lowText.includes('buat agenda');
+                const hasEditKeywords = ['ganti', 'ubah', 'template', 'pesan', 'alarm', 'skema', 'durasi', 'eksekusi', 'jam', 'waktu', 'judul', 'samain', 'kaya'].some(w => lowText.includes(w));
+                const isYes = !hasEditKeywords && (/\b(iya|ya|yoi|fix|save|simpan|iye|iyee)\b/i.test(lowText) || lowText === 'y');
                 
                 if (isYes) {
-                    const data = state.data;
+                    const data = state.data; 
                     let targetTimestamp = Date.now();
                     
                     // Rekonstruksi matematika konversi jam dinding digital Jakarta yan
@@ -1499,19 +1519,20 @@ Data draf saat ini: ${JSON.stringify(state.data)}
 User membalas dengan ketikan bebas: "${text}"
 
 Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentuk JSON objek murni untuk menentukan tipe keputusan:
-1. "batal": Jika user menggunakan kalimat pembatalan kasual/kaku. Kalimat balasan berupa penutupan lowercase ramah.
+1. "batal": Jika user menggunakan kalimat pembatalan kasual/kaku.
 2. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, skema alarm kustom, template pesan durasi, maupun template pesan sekarang).
 
 Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - Jika user meminta alarm berbasis interval rutin atau permenit (misal: "skema alarm dibikin interval permenit", "interval 1 menit"), isi properti "intervalMinutes" dengan angka menit tersebut, dan set properti "customMilestones" menjadi null bray.
 - Jika user meminta alarm di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
 - Jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
-- Jika user meminta menyamakan nilai parameter (misal: "template durasi samain aja kaya eksekusi"), salin teks kalimat eksekusi yang ada di data draf saat ini untuk dimasukkan ke parameter pesanDurasi. Begitupun sebaliknya jika diminta.
+- Jika user meminta menyamakan template durasi dengan template eksekusi (misal: "template durasi samain kaya eksekusi"), salin isi string template eksekusi draf saat ini (yaitu teks mutlak: "${state.data.pesanNow || 'sekarang waktunya {judul} bray!'}") ke parameter "pesanDurasi".
+- Jika user meminta menyamakan template eksekusi dengan template durasi (misal: "template eksekusi samain kaya template durasi"), salin isi string template durasi draf saat ini (yaitu teks mutlak: "${state.data.pesanDurasi || 'waktunya {judul} bentar lagi nih!'}") ke parameter "pesanNow".
 - Jika user mengubah judul, isi properti "judul" dengan nama agenda baru.
 - Jika user mengubah jam/waktu, isi properti "waktu" dengan format HH:MM digital.
 - Jika user mengubah template pesan durasi, masukkan teks kalimat barunya ke properti "pesanDurasi".
 - Jika user mengubah template pesan sekarang (H-0), masukkan teks kalimat barunya ke property "pesanNow".
-- Jika user meminta target penerima diubah ke dirinya sendiri, isi properti "extractedTarget" dengan string murni "sender". 
+- Jika user meminta target penerima diubah ke dirinya sendiri, isi properti "extractedTarget" with string murni "sender". 
 - KHUSUS KOREKSI DATABASE KONTAK: Jika user memerintahkan pembaruan database nomor hp, tangkap data tersebut dan masukkan ke dalam properti objek "update_database_kontak" dengan sub-properti "nama" dan "nomor".
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
@@ -1549,7 +1570,6 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
 
                     if (updateResult.keputusan === 'edit') {
-                        // SENSOR PEMBARU DATABASE KONTAK KHUSUS OWNER (MENDUKUNG AKUN ENKRIPSI LID LU BRAY)
                         if (updateResult.update_database_kontak) {
                             const dbKontak = updateResult.update_database_kontak;
                             if (dbKontak.nama && dbKontak.nomor) {
@@ -1570,16 +1590,51 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
 
                         const params = updateResult.parameter_berubah || {};
                         
-                        // EKSEKUSI MUTASI PARAMETER RAM SECARA SELEKTIF YAN
+                        if (params.customMilestones === null && params.intervalMinutes === null) {
+                            delete params.customMilestones;
+                            delete params.intervalMinutes;
+                        }
+
+                        // CLONE BACKUP MEMORI RAM SEBELUM DIMUTASI (Untuk Rollback jika meledak)
+                        const backupJudul = state.data.judul;
+                        const backupWaktu = state.data.waktu;
+                        const backupCustomMilestones = state.data.customMilestones ? [...state.data.customMilestones] : null;
+                        const backupIntervalMinutes = state.data.intervalMinutes;
+                        const backupPesanDurasi = state.data.pesanDurasi;
+                        const backupPesanNow = state.data.pesanNow;
+
                         Object.keys(params).forEach(key => {
                             if (params[key] !== undefined && params[key] !== null) {
                                 state.data[key] = params[key];
                             } else if (params[key] === null && (key === 'intervalMinutes' || key === 'customMilestones')) {
-                                state.data[key] = null; // Izinkan null jika AI sengaja ingin menghapus salah satu skema bray
+                                state.data[key] = null; 
                             }
                         });
+
+                        // BENTENG PENGAMAN ANTI-BYPASS: Uji kelayakan jumlah deret milestones baru bray
+                        const intervalCheck = state.data.intervalMinutes || 1;
+                        const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones);
                         
-                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        if (testCalculated.length > 30) {
+                            // ROLLBACK DATA RAM INSTAN KARENA JEBOL
+                            state.data.judul = backupJudul;
+                            state.data.waktu = backupWaktu;
+                            state.data.customMilestones = backupCustomMilestones;
+                            state.data.intervalMinutes = backupIntervalMinutes;
+                            state.data.pesanDurasi = backupPesanDurasi;
+                            state.data.pesanNow = backupPesanNow;
+
+                            await sock.sendMessage(fromJid, { text: `⚠️ *[BACKEND BLOCK NOTICE]*\nperubahan skema alarm otomatis gue tolak bray karena menghasilkan *${testCalculated.length} kali* pengingat beruntun. server bisa gempor wkwk. draf gue kembalikan ke posisi aman semula ya yan.` }, { quoted: msg });
+                        }
+                        
+                        // KIRIM UTUH BESERTA LOGGING DEBUG BARU KE LAYAR WA LU BRAY
+                        const debugInfoData = {
+                            inputText: text,
+                            keputusan: updateResult.keputusan,
+                            rawPayload: cleanJsonStr
+                        };
+
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg, debugInfoData);
                         return;
                     }
 
