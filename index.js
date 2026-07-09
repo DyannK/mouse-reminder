@@ -288,11 +288,11 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
     // SIRKUIT BARU: Menyusun baris rincian kalender absolut lintas minggu biar makin detail bray
     let barisWaktuTambahan = '';
     if (data.type === 'recurring') {
-        barisWaktuTambahan = `• *pola rutin*: ${data.cronPattern ? translateCronToHuman(data.cronPattern) : 'setiap saat'}\n`;
+        barisWaktuTambahan = `• *Pola Rutin*: ${data.cronPattern ? translateCronToHuman(data.cronPattern) : 'setiap saat'}\n`;
     } else {
-        barisWaktuTambahan = `• *tanggal target*: ${data.tanggal || 'hari ini / esok hari'}\n`;
+        barisWaktuTambahan = `• *Tanggal Target*: ${data.tanggal || 'hari ini / esok hari'}\n`;
         if (data.withDailyReminder) {
-            barisWaktuTambahan += `• *rentang harian*: mulai ${data.dailyReminderStartDate || 'hari ini'} (tiap jam ${jamHarianTeks} wib)\n`;
+            barisWaktuTambahan += `• *Rentang Harian*: mulai ${data.dailyReminderStartDate || 'hari ini'} (tiap jam ${jamHarianTeks} wib)\n`;
         }
     }
 
