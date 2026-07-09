@@ -269,14 +269,33 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
     }
     
     const intervalVal = data.intervalMinutes || 1;
-    const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones, data.tanggal, data.withDailyReminder, data.dailyReminderStartDate, data.dailyReminderTime);
+    const milestones = calculateMilestonesArray(
+        data.waktu, 
+        data.startTime, 
+        intervalVal, 
+        data.customMilestones, 
+        data.tanggal, 
+        data.withDailyReminder, 
+        data.dailyReminderStartDate, 
+        data.dailyReminderTime
+    );
 
     const jamHarianTeks = data.dailyReminderTime || '20:00';
     let skemaText = data.type === 'recurring'
         ? `${milestones.length} kali pengingat rutin (setiap pola cron berdetak)`
         : `${milestones.length} kali total pengingat (aktif: rutin harian jam ${jamHarianTeks} & kustom hari H [${(data.customMilestones || []).join(', ')}])`;
 
-    // GELEMBUNG LOGGING DEBUG LIVE UNTUK MEMANTAU JALUR BACKEND
+    // SIRKUIT BARU: Menyusun baris rincian kalender absolut lintas minggu biar makin detail bray
+    let barisWaktuTambahan = '';
+    if (data.type === 'recurring') {
+        barisWaktuTambahan = `• *pola rutin*: ${data.cronPattern ? translateCronToHuman(data.cronPattern) : 'setiap saat'}\n`;
+    } else {
+        barisWaktuTambahan = `• *tanggal target*: ${data.tanggal || 'hari ini / esok hari'}\n`;
+        if (data.withDailyReminder) {
+            barisWaktuTambahan += `• *rentang harian*: mulai ${data.dailyReminderStartDate || 'hari ini'} (tiap jam ${jamHarianTeks} wib)\n`;
+        }
+    }
+
     let debugHeaderTeks = '';
     if (debugInfo) {
         debugHeaderTeks = `⚙️ *[LOGGING DEBUG BACKEND]*\n` +
@@ -287,17 +306,18 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
     }
 
     let confirmationText = debugHeaderTeks + 
-        `📋 *[konfirmasi agenda]*\n` +
-        `• *judul aktivitas*: ${data.judul || 'agenda kasual'}\n` +
-        `• *pembuat agenda*: ${data.creator || 'tidak dikenal'} (${data.creatorJid || 'tidak ada nomor'})\n` +
-        `• *waktu sasaran*: jam ${data.waktu || 'belum diset'} wib\n` +
-        `• *target penerima*: ${targetText}\n` + 
-        `• *status pelacakan*: ${data.withTracking !== false ? 'aktif' : 'nonaktif atau silent'}\n` +
-        `• *status laporan*: ${data.withReport !== false ? 'aktif' : 'nonaktif'}\n` +
-        `• *skema alarm*: ${skemaText}\n` + 
-        `• *template durasi*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
-        `• *template eksekusi*: "${data.pesanNow || `sekarang waktunya {judul} bray!`}"\n\n` +
-        `📝 *sistem pengubah parameter diterima*:\n` +
+        `📋 *[KONFIRMASI AGENDA]*\n` +
+        `• *Judul Aktivitas*: ${data.judul || 'agenda kasual'}\n` +
+        `• *Pembuat Agenda*: ${data.creator || 'tidak dikenal'} (${data.creatorJid || 'tidak ada nomor'})\n` +
+        `• *Waktu Sasaran*: jam ${data.waktu || 'belum diset'} wib\n` +
+        barisWaktuTambahan + // Suntikan otomatis baris tanggal kalender atau pengulangan harian yan
+        `• *Target Penerima*: ${targetText}\n` + 
+        `• *Status Pelacakan*: ${data.withTracking !== false ? 'aktif' : 'nonaktif atau silent'}\n` +
+        `• *Status Laporan*: ${data.withReport !== false ? 'aktif' : 'nonaktif'}\n` +
+        `• *Skema Alarm*: ${skemaText}\n` + 
+        `• *Template Durasi*: "${data.pesanDurasi || `waktunya {judul} bentar lagi nih!`}"\n` +
+        `• *Template Eksekusi*: "${data.pesanNow || `sekarang waktunya {judul} bray!`}"\n\n` +
+        `📝 *Sistem pengubah parameter diterima*:\n` +
         `lu bisa ketik kalimat kasual untuk mengubah manifes di atas secara langsung.\n` +
         `contoh: "ganti judul...", "ganti alarm...", "matikan laporan".\n\n` +
         `balas *iya* untuk mengunci memori dan menyimpan agenda ini.`;
