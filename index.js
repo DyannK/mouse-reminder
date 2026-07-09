@@ -156,7 +156,7 @@ function getJakartaDateComponents(baseDate = new Date()) {
     return Object.fromEntries(parts.map(p => [p.type, p.value]));
 }
 
-function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, customMilestones = null) {
+function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, customMilestones = null, targetTanggal = null, withDailyReminder = false) {
     if (!waktuTarget || !waktuTarget.includes(':')) {
         return [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }];
     }
@@ -165,8 +165,11 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
     const tParts = getJakartaDateComponents(now);
     const [tHour, tMin] = waktuTarget.split(':').map(Number);
     
-    let targetDate = new Date(`${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}T${String(tHour).padStart(2, '0')}:${String(tMin).padStart(2, '0')}:00+07:00`);
-    if (targetDate.getTime() <= now.getTime()) {
+    // JANGKAR KALENDER ABSOLUT UTAMA AGAR ALARM TIDAK LENYAP BRAY
+    const tglString = targetTanggal || `${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}`;
+    let targetDate = new Date(`${tglString}T${String(tHour).padStart(2, '0')}:${String(tMin).padStart(2, '0')}:00+07:00`);
+    
+    if (!targetTanggal && targetDate.getTime() <= now.getTime()) {
         targetDate.setDate(targetDate.getDate() + 1);
     }
 
@@ -184,14 +187,37 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
     const diffMin = Math.floor(diffMs / (60 * 1000));
     
     let milestones = [];
+    let finalCustomMilestones = customMilestones ? [...customMilestones] : [];
+    
+    // MESIN DETERMINISTIK GENERATOR PENGINGAT HARIAN OTOMATIS BERBASIS JALUR JALUR JAVASCRIPT
+    if (withDailyReminder && targetTanggal) {
+        let loopDate = new Date(targetDate.getTime());
+        loopDate.setDate(loopDate.getDate() - 1); // Mulai mundur dari H-1
+        
+        while (loopDate.getTime() > now.getTime()) {
+            let dailyReminderDate = new Date(`${loopDate.getFullYear()}-${String(loopDate.getMonth() + 1).padStart(2, '0')}-${String(loopDate.getDate()).padStart(2, '0')}T20:00:00+07:00`);
+            
+            if (dailyReminderDate.getTime() > now.getTime() && dailyReminderDate.getTime() < targetDate.getTime()) {
+                const dailyDiffMin = Math.floor((targetDate.getTime() - dailyReminderDate.getTime()) / (60 * 1000));
+                if (!finalCustomMilestones.includes(dailyDiffMin)) {
+                    finalCustomMilestones.push(dailyDiffMin);
+                }
+            }
+            loopDate.setDate(loopDate.getDate() - 1); // Mundur terus ke hari sebelum-sebelumnya bray
+        }
+    }
 
-    // FORMAT BARU: Langsung memetakan kalimat kasual manusia bray
     const buatLabelJamDinamis = (menitMundur) => {
-    return menitMundur === 0 ? `waktu utama` : `${menitMundur} menit lagi menuju jam (${waktuTarget})`;
+        if (menitMundur === 0) return `waktu utama`;
+        if (menitMundur >= 1440) {
+            const hari = Math.floor(menitMundur / 1440);
+            return `pengingat harian ${hari} hari sebelum hari H`;
+        }
+        return `${menitMundur} menit lagi menuju jam (${waktuTarget})`;
     };
 
-    if (customMilestones && Array.isArray(customMilestones)) {
-        customMilestones.forEach(min => {
+    if (finalCustomMilestones.length > 0) {
+        finalCustomMilestones.forEach(min => {
             if (min <= diffMin) {
                 milestones.push({
                     type: 'durasi',
@@ -206,11 +232,9 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
         }
     } else {
         let step = (intervalMin && intervalMin > 0) ? intervalMin : 0;
-
         if (diffMin <= 0 || step === 0) {
             return [{ type: 'durasi', totalMinutes: 0, label: buatLabelJamDinamis(0), isAuto: true }];
         }
-
         for (let minRemaining = 0; minRemaining <= diffMin; minRemaining += step) {
             milestones.push({
                 type: 'durasi',
@@ -237,7 +261,7 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
     }
     
     const intervalVal = data.intervalMinutes || 1;
-    const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
+    const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones, data.tanggal, data.withDailyReminder);
 
     let skemaText = data.customMilestones 
         ? `kustom pada menit ke [${data.customMilestones.join(', ')}] terakhir sebelum mulai` 
@@ -1470,7 +1494,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
 
                     const intervalVal = data.intervalMinutes || 1;
-                    const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones);
+                    const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones, data.tanggal, data.withDailyReminder);
 
                     let targetJidsFinal = [fromJid];
                     let finalScope = isGroup ? 'group' : 'personal';
@@ -1567,7 +1591,7 @@ Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - Jika user mengubah skema alarm menjadi interval rutin atau permenit, kamu WAJIB memaksa nilai properti "startTime" di objek draf ini menjadi null bray, agar hitungan matematika selisih jamnya tidak rusak kembali ke 0.
 - Jika user mengubah pola pengulangan rutin (misal: "ubah jadwalnya jadi tiap hari jumat jam 09:00"), kamu WAJIB memperbarui properti "type" menjadi "recurring" dan buatkan susunan format linux cron 5 digit terbaru di properti "cronPattern" secara akurat bray!
 - Jika user merevisi waktu alarm di hari terakhir menggunakan jam dinding kaku (misal: "di hari terakhir ingetin jam 8 pagi dan 9 malam"), kamu WAJIB menghitung selisih menit mundur dari jam alarm tersebut menuju jam target utama agenda saat ini, lalu masukkan hasilnya berupa array angka menit mundur ke dalam properti "customMilestones" bray!
-
+- Jika user membahas atau merubah skema pengingat harian (misal: "matikan pengingat harian", "pengingat harian aktifin"), set properti "withDailyReminder" menjadi true atau false secara akurat bray!
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
@@ -1647,8 +1671,8 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
 
                         // BENTENG PENGAMAN ANTI-BYPASS: Uji kelayakan jumlah deret milestones baru bray
                         const intervalCheck = state.data.intervalMinutes || 1;
-                        const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones);
-                        
+                        const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones, state.data.tanggal, state.data.withDailyReminder);
+
                         if (testCalculated.length > 30) {
                             // ROLLBACK DATA RAM INSTAN KARENA JEBOL
                             state.data.judul = backupJudul;
@@ -1790,8 +1814,8 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
                 }
 
-                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1, intentData.customMilestones);
-                
+                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1, intentData.customMilestones, intentData.tanggal, intentData.withDailyReminder);
+
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
                     const reply = await generateDynamicStateText(`ini yakin gue ngingetin ${calculated.length} kali gempor gue gila bray server bisa meledak coba benerin lagi maksud lu gimana mau diganti tiap berapa menit`, currentNick, samples, chatMemory[fromJid] || []);

@@ -171,15 +171,15 @@ pilihan intent:
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
 aturan ekstraksi parameter untuk "create_schedule":
-- TANGGAL TARGET: Ambil tanggal, bulan, dan tahun target yang disebutkan user (misal: "20 juli 2026"). Konversikan menjadi string format absolut "YYYY-MM-DD" di properti "tanggal". Jika user tidak menyebutkan tanggal atau hanya bilang "hari ini/besok", berikan nilai null bray.
-- ATURAN CUSTOM MILESTONES: Properti "customMilestones" WAJIB berisi larik angka menit hitung mundur SEBELUM target utama dimulai bray! Jangan pernah memasukkan angka menit dari jam dinding kaku!
-  *Contoh Matematika Konversi*: Jika target utama adalah jam 23:00 WIB.
-  1. User minta alarm jam 22:50 malam -> selisihnya 10 menit sebelum mulai, maka masukkan angka [10].
-  2. User minta alarm jam 21:00 malam -> selisihnya 2 jam sebelum mulai, konversi menjadi menit: 2 * 60 = 120, maka masukkan angka [120].
-  3. User minta alarm jam 08:00 pagi di hari yang sama -> selisihnya 15 jam sebelum mulai, konversi menjadi menit: 15 * 60 = 900, maka masukkan angka [900].
-  Susun seluruh angka selisih menit tersebut ke dalam satu array terurut dari terbesar ke terkecil di properti "customMilestones" bray!
-- PENGINGAT HARIAN DEADLINE: Jika user minta diingatkan "setiap hari" pada deadline jauh-jauh hari, hitung perkiraan jumlah hari dari sekarang menuju tanggal target tersebut, lalu suntikkan kelipatan menit harian (1440 untuk 1 hari, 2880 untuk 2 hari, 4320 untuk 3 hari, dst) ke dalam properti "customMilestones".
-- jika user meminta alarm berbasis interval rutin atau setiap menit tanpa tanggal kaku, isi properti "intervalMinutes" dengan angka menit tersebut, dan buat "customMilestones" menjadi null bray.
+- TANGGAL TARGET: Ambil tanggal, bulan, dan tahun target yang disebutkan user (misal: "20 juli 2026"). Konversikan menjadi string format absolut "YYYY-MM-DD" di properti "tanggal". Jika tidak disebutkan, beri nilai null bray.
+- SAKELAR HARIAN: set properti "withDailyReminder" menjadi true jika user secara eksplisit meminta pengingat rutin harian menuju hari H (misal: "pengingat harian", "ingetin setiap hari"). jika tidak ada, default set false bray.
+- ATURAN CUSTOM MILESTONES: Properti "customMilestones" HANYA berisi larik angka menit hitung mundur khusus untuk hari terakhir (hari H) saja sebelum target utama dimulai bray! Jangan hitung pengingat harian di sini.
+  *Contoh Konversi Hari H*: Jika target jam 23:00 WIB.
+  1. User minta alarm jam 22:55 malam -> selisih 5 menit, masukkan angka [5].
+  2. User minta alarm jam 21:00 malam -> selisih 2 jam (2 * 60), masukkan angka [120].
+  3. User minta alarm jam 08:00 pagi -> selisih 15 jam (15 * 60), masukkan angka [900].
+  Susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones" bray!
+- jika user meminta alarm berbasis interval rutin atau setiap menit tanpa tanggal kaku, isi properti "intervalMinutes" dengan angka menit tersebut, dan buat "customMilestones" menjadi null.
 - jika user menyebutkan kata pembatalan laporan, set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
 - jika user merujuk ke diri sendiri, kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". 
 
@@ -188,6 +188,7 @@ format output json murni:
   "intent": "create_schedule" | "chat",
   "type": "deadline" | "recurring",
   "tanggal": "string format YYYY-MM-DD atau null",
+  "withDailyReminder": boolean,
   "judul": "string atau null",
   "waktu": "string format HH:MM atau null",
   "intervalMinutes": number atau null,
