@@ -172,11 +172,12 @@ pilihan intent:
 
 aturan ekstraksi parameter untuk "create_schedule":
 - jika user menyebutkan rentetan menit pengingat spesifik (misal: "pengingat di 30 menit, 20 menit..."), ambil seluruh angka menit tersebut, susun menjadi array/larik angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
-- jika user meminta alarm berbasis interval rutin atau setiap menit (misal: "ingetin aja setiap menit", "skema alarm interval 1 menit", "per 1 menit"), kamu WAJIB mengisi properti "intervalMinutes" dengan angka menit tersebut, dan buat nilai "customMilestones" menjadi null bray.
-- jika user menyebutkan kata pembatalan laporan (misal: "tanpa laporan", "matikan laporan"), set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
-- jika user merujuk ke diri sendiri (misal: "buat gue pribadi", "buat saya"), kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". 
-- jika merujuk ke nama kontak atau nama orang lain (misal: "buat dyan", "buat fizar"), baru isi properti "extractedTarget" dengan nama orang tersebut.
-- PERINGATAN STRUKTUR TEKS: Jika user memasukkan template pesan yang membawa awalan "AI:" (baik memakai tanda kutip ataupun tidak), kamu WAJIB mempertahankan kata "AI:" tersebut utuh di dalam string teks keluaran parameter pesanDurasi atau pesanNow bray! jangan pernah dihapus atau dipotong!
+- jika user meminta alarm berbasis interval rutin atau setiap menit (misal: "skema alarm diganti jadi permenit", "interval 5 menit"), kamu WAJIB mengisi properti "intervalMinutes" dengan angka menit tersebut, dan WAJIB memberikan nilai null pada properti "customMilestones" bray!
+- jika user menyebutkan kata pembatalan laporan, set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
+- jika user merujuk ke diri sendiri, kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". 
+- jika merujuk ke nama kontak atau nama orang lain, baru isi properti "extractedTarget" dengan nama orang tersebut.
+- PERINGATAN GABUNGAN TEMPLATE: jika user mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat (misal: "template durasi dan eksekusi nya gini..."), kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string yang sama bray!
+- PERINGATAN STRUKTUR STRING LITERAL: jika teks template yang dimasukkan user mengandung kata "AI:", teks "AI:" tersebut wajib dimasukkan utuh sebagai bagian dari isi string literal pesanDurasi atau pesanNow, jangan pernah dipotong atau dibuang bray!
 
 format output json murni:
 {

@@ -1426,8 +1426,8 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 // ====================================================================
                 // LAPIS 2: JALUR CEPAT TOMBOL PENGUNCI JADWAL (MILIDETIK)
                 // ====================================================================
-                const hasEditKeywords = ['ganti', 'ubah', 'template', 'pesan', 'alarm', 'skema', 'durasi', 'eksekusi', 'jam', 'waktu', 'judul', 'samain', 'kaya'].some(w => lowText.includes(w));
-                const isYes = !hasEditKeywords && (/\b(iya|ya|yoi|fix|save|simpan|iye|iyee)\b/i.test(lowText) || lowText === 'y');
+                const hasEditKeywords = ['ganti', 'ubah', 'template', 'pesan', 'alarm', 'skema', 'durasi', 'eksekusi', 'jam', 'waktu', 'judul', 'samain', 'kaya', 'jadi', 'dibikin', 'interval', 'permenit', 'menit'].some(w => lowText.includes(w));
+                const isYes = !hasEditKeywords && (/\b(iya|ya|yoi|fix|save|simpan|iye|iyee|sip|sipp|sippp)\b/i.test(lowText) || lowText === 'y' || lowText === 'iya gitu');
                 
                 if (isYes) {
                     const data = state.data; 
@@ -1534,6 +1534,11 @@ Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - Jika user mengubah template pesan sekarang (H-0), masukkan teks kalimat barunya ke property "pesanNow".
 - Jika user meminta target penerima diubah ke dirinya sendiri, isi properti "extractedTarget" with string murni "sender". 
 - KHUSUS KOREKSI DATABASE KONTAK: Jika user memerintahkan pembaruan database nomor hp, tangkap data tersebut dan masukkan ke dalam properti objek "update_database_kontak" dengan sub-properti "nama" dan "nomor".
+- jika user meminta alarm berbasis interval rutin atau permenit (misal: "skema alarm diganti jadi permenit", "interval 1 menit"), isi properti "intervalMinutes" dengan angka menit tersebut, dan kamu WAJIB memaksa properti "customMilestones" bernilai null bray!
+- jika user meminta alarm di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
+- jika user meminta mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat (misal: "template durasi dan eksekusi nya gini..."), kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string teks yang sama tersebut bray!
+- jika user memasukkan kata "AI:" di dalam teks template barunya, isi teks "AI:" tersebut adalah string literal mutlak yang wajib lu pertahankan utuh di dalam properti pesanDurasi atau pesanNow, jangan pernah dipotong!
+- jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
