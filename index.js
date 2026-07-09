@@ -156,7 +156,7 @@ function getJakartaDateComponents(baseDate = new Date()) {
     return Object.fromEntries(parts.map(p => [p.type, p.value]));
 }
 
-function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, customMilestones = null, targetTanggal = null, withDailyReminder = false) {
+function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, customMilestones = null, targetTanggal = null, withDailyReminder = false, dailyReminderStartDate = null, dailyReminderTime = null) {
     if (!waktuTarget || !waktuTarget.includes(':')) {
         return [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }];
     }
@@ -165,7 +165,6 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
     const tParts = getJakartaDateComponents(now);
     const [tHour, tMin] = waktuTarget.split(':').map(Number);
     
-    // JANGKAR KALENDER ABSOLUT UTAMA AGAR ALARM TIDAK LENYAP BRAY
     const tglString = targetTanggal || `${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}`;
     let targetDate = new Date(`${tglString}T${String(tHour).padStart(2, '0')}:${String(tMin).padStart(2, '0')}:00+07:00`);
     
@@ -189,21 +188,30 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
     let milestones = [];
     let finalCustomMilestones = customMilestones ? [...customMilestones] : [];
     
-    // MESIN DETERMINISTIK GENERATOR PENGINGAT HARIAN OTOMATIS BERBASIS JALUR JALUR JAVASCRIPT
+    // MESIN LOOPING MAJU UNTUK MENGUNCI BATAS AWAL TANGGAL DARI USER YAN BRAY
     if (withDailyReminder && targetTanggal) {
-        let loopDate = new Date(targetDate.getTime());
-        loopDate.setDate(loopDate.getDate() - 1); // Mulai mundur dari H-1
+        const [dHour, dMin] = (dailyReminderTime && dailyReminderTime.includes(':')) ? dailyReminderTime.split(':').map(Number) : [20, 0];
         
-        while (loopDate.getTime() > now.getTime()) {
-            let dailyReminderDate = new Date(`${loopDate.getFullYear()}-${String(loopDate.getMonth() + 1).padStart(2, '0')}-${String(loopDate.getDate()).padStart(2, '0')}T20:00:00+07:00`);
+        let loopDate = dailyReminderStartDate 
+            ? new Date(`${dailyReminderStartDate}T00:00:00+07:00`) 
+            : new Date(now.getTime());
             
-            if (dailyReminderDate.getTime() > now.getTime() && dailyReminderDate.getTime() < targetDate.getTime()) {
+        let endLoopDate = new Date(targetDate.getTime());
+        
+        // Bersihkan komponen jam agar murni melakukan perulangan tanggal kalender bray
+        let dStart = new Date(loopDate.getFullYear(), loopDate.getMonth(), loopDate.getDate());
+        let dEnd = new Date(endLoopDate.getFullYear(), endLoopDate.getMonth(), endLoopDate.getDate());
+        
+        while (dStart <= dEnd) {
+            let dailyReminderDate = new Date(`${dStart.getFullYear()}-${String(dStart.getMonth() + 1).padStart(2, '0')}-${String(dStart.getDate()).padStart(2, '0')}T${String(dHour).padStart(2, '0')}:${String(dMin).padStart(2, '0')}:00+07:00`);
+            
+            if (dailyReminderDate.getTime() > now.getTime() && dailyReminderDate.getTime() <= targetDate.getTime()) {
                 const dailyDiffMin = Math.floor((targetDate.getTime() - dailyReminderDate.getTime()) / (60 * 1000));
-                if (!finalCustomMilestones.includes(dailyDiffMin)) {
+                if (dailyDiffMin >= 0 && !finalCustomMilestones.includes(dailyDiffMin)) {
                     finalCustomMilestones.push(dailyDiffMin);
                 }
             }
-            loopDate.setDate(loopDate.getDate() - 1); // Mundur terus ke hari sebelum-sebelumnya bray
+            dStart.setDate(dStart.getDate() + 1);
         }
     }
 
@@ -261,12 +269,12 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
     }
     
     const intervalVal = data.intervalMinutes || 1;
-    const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones, data.tanggal, data.withDailyReminder);
+    const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones, data.tanggal, data.withDailyReminder, data.dailyReminderStartDate, data.dailyReminderTime);
 
-    // KUNCI DISPLAY BARU: Biar transparan menampilkan total 14 alarm kalender lo bray!
+    const jamHarianTeks = data.dailyReminderTime || '20:00';
     let skemaText = data.type === 'recurring'
         ? `${milestones.length} kali pengingat rutin (setiap pola cron berdetak)`
-        : `${milestones.length} kali total pengingat (aktif: rutin harian jam 20:00 & kustom hari H [${(data.customMilestones || []).join(', ')}])`;
+        : `${milestones.length} kali total pengingat (aktif: rutin harian jam ${jamHarianTeks} & kustom hari H [${(data.customMilestones || []).join(', ')}])`;
 
     // GELEMBUNG LOGGING DEBUG LIVE UNTUK MEMANTAU JALUR BACKEND
     let debugHeaderTeks = '';
@@ -915,8 +923,10 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
             type: data.type || 'deadline',
             scope: finalScope,
             targetTimestamp: targetTimestamp,
-            tanggal: data.tanggal || null,             // AMANKAN TANGGAL ABSOLUT DI SINI YAN
-            withDailyReminder: data.withDailyReminder || false, // AMANKAN SAKELAR HARIAN DI SINI BRAY
+            tanggal: data.tanggal || null,
+            dailyReminderStartDate: data.dailyReminderStartDate || null, // KUNCI BATAS AWAL TANGGAL YAN
+            dailyReminderTime: data.dailyReminderTime || null,           // KUNCI JAM HARIAN DINAMIS BRAY
+            withDailyReminder: data.withDailyReminder || false,
             judul: data.judul || 'agenda kasual',
             message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
             manualFallback: data.judul || 'agenda kasual',
@@ -1595,6 +1605,7 @@ Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - Jika user mengubah pola pengulangan rutin (misal: "ubah jadwalnya jadi tiap hari jumat jam 09:00"), kamu WAJIB memperbarui properti "type" menjadi "recurring" dan buatkan susunan format linux cron 5 digit terbaru di properti "cronPattern" secara akurat bray!
 - Jika user merevisi waktu alarm di hari terakhir menggunakan jam dinding kaku (misal: "di hari terakhir ingetin jam 8 pagi dan 9 malam"), kamu WAJIB menghitung selisih menit mundur dari jam alarm tersebut menuju jam target utama agenda saat ini, lalu masukkan hasilnya berupa array angka menit mundur ke dalam properti "customMilestones" bray!
 - Jika user membahas atau merubah skema pengingat harian (misal: "matikan pengingat harian", "pengingat harian aktifin"), set properti "withDailyReminder" menjadi true atau false secara akurat bray!
+- Jika user mengubah tanggal awal harian atau jam harian (misal: "ganti pengingat hariannya jadi mulai tanggal 12 jam 8 malam"), perbarui parameter "dailyReminderStartDate" dengan format YYYY-MM-DD dan "dailyReminderTime" dengan format HH:MM secara akurat bray!
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
@@ -1674,7 +1685,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
 
                         // BENTENG PENGAMAN ANTI-BYPASS: Uji kelayakan jumlah deret milestones baru bray
                         const intervalCheck = state.data.intervalMinutes || 1;
-                        const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones, state.data.tanggal, state.data.withDailyReminder);
+                        const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones, state.data.tanggal, state.data.withDailyReminder, state.data.dailyReminderStartDate, state.data.dailyReminderTime);
 
                         if (testCalculated.length > 30) {
                             // ROLLBACK DATA RAM INSTAN KARENA JEBOL
@@ -1817,7 +1828,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
                 }
 
-                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1, intentData.customMilestones, intentData.tanggal, intentData.withDailyReminder);
+                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1, intentData.customMilestones, intentData.tanggal, intentData.withDailyReminder, intentData.dailyReminderStartDate, intentData.dailyReminderTime);
 
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
