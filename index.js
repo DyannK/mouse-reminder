@@ -793,6 +793,10 @@ async function checkDeadlines(sock) {
 }
 
 function setupSchedules(sock) {
+    scheduledTasks.forEach(task => task.stop());
+    scheduledTasks = [];
+    const config = loadConfig();
+
     config.reminders.forEach((reminder) => {
         if (reminder.type === 'deadline') return;
         
@@ -840,14 +844,13 @@ function setupSchedules(sock) {
     // KATUP AUTO-DELETE: PEMBERSIH UTAMAA FILE MEDIA TG SETELAH 1 HARI YAN
     // ====================================================================
     scheduledTasks.push(cron.schedule('0 * * * *', () => {
-        // Alamat folder scraper bray
         const targetDir = path.join(__dirname, '..', 'home-reminder'); 
         const directory = fs.existsSync(targetDir) ? targetDir : __dirname;
         
         fs.readdir(directory, (err, files) => {
             if (err) return;
             const now = Date.now();
-            const oneDayInMs = 24 * 60 * 60 * 1000; // Filter ketat durasi 24 jam penuh yan bray
+            const oneDayInMs = 24 * 60 * 60 * 1000; 
             
             files.forEach(file => {
                 if (file.startsWith('tgmedia_')) {
@@ -864,7 +867,6 @@ function setupSchedules(sock) {
             });
         });
     }, { timezone: 'Asia/Jakarta' }));
-
 }
 
 async function processMediaReminderDownload(sock, msg, fromJid, captionText, config) {
