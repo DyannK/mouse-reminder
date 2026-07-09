@@ -1751,7 +1751,8 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         }
 
                         // BENTENG PENGAMAN ANTI-BYPASS: Uji kelayakan jumlah deret milestones baru bray
-                        const intervalCheck = state.data.intervalMinutes;
+                        const intervalCheck = state.data.intervalMinutes; // || 1 SUDAH RESMI DICABUT YAN BIAR GA KORSLETING MALAM
+                        const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones, state.data.tanggal, state.data.withDailyReminder, state.data.dailyReminderStartDate, state.data.dailyReminderTime);
 
                         if (testCalculated.length > 30) {
                             // ROLLBACK DATA RAM INSTAN KARENA JEBOL
@@ -1763,6 +1764,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                             state.data.pesanNow = backupPesanNow;
 
                             await sock.sendMessage(fromJid, { text: `⚠️ *[BACKEND BLOCK NOTICE]*\nperubahan skema alarm otomatis gue tolak bray karena menghasilkan *${testCalculated.length} kali* pengingat beruntun. server bisa gempor wkwk. draf gue kembalikan ke posisi aman semula ya yan.` }, { quoted: msg });
+                            return;
                         }
                         
                         // KIRIM UTUH BESERTA LOGGING DEBUG BARU KE LAYAR WA LU BRAY
