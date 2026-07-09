@@ -263,9 +263,10 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
     const intervalVal = data.intervalMinutes || 1;
     const milestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones, data.tanggal, data.withDailyReminder);
 
-    let skemaText = data.customMilestones 
-        ? `kustom pada menit ke [${data.customMilestones.join(', ')}] terakhir sebelum mulai` 
-        : `${milestones.length} kali pengingat beruntun (interval tiap ${intervalVal} menit dari waktu mulai)`;
+    // KUNCI DISPLAY BARU: Biar transparan menampilkan total 14 alarm kalender lo bray!
+    let skemaText = data.type === 'recurring'
+        ? `${milestones.length} kali pengingat rutin (setiap pola cron berdetak)`
+        : `${milestones.length} kali total pengingat (aktif: rutin harian jam 20:00 & kustom hari H [${(data.customMilestones || []).join(', ')}])`;
 
     // GELEMBUNG LOGGING DEBUG LIVE UNTUK MEMANTAU JALUR BACKEND
     let debugHeaderTeks = '';
@@ -910,13 +911,15 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
         const targetTime = intent.waktu || "07:00";
 
         config.reminders.push({
-            id: `media_${Date.now().toString().slice(-4)}`,
-            type: 'recurring',
-            scope: 'personal',
-            cronPattern: `0 ${targetTime.split(':')[1]} ${targetTime.split(':')[0]} * * *`,
-            judul: 'Pengingat Media',
-            message: captionText,
-            manualFallback: 'pengingat media tiba',
+            id: data.type === 'recurring' ? `rec_${Date.now().toString().slice(-4)}` : `ai_${Date.now().toString().slice(-4)}`,
+            type: data.type || 'deadline',
+            scope: finalScope,
+            targetTimestamp: targetTimestamp,
+            tanggal: data.tanggal || null,             // AMANKAN TANGGAL ABSOLUT DI SINI YAN
+            withDailyReminder: data.withDailyReminder || false, // AMANKAN SAKELAR HARIAN DI SINI BRAY
+            judul: data.judul || 'agenda kasual',
+            message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
+            manualFallback: data.judul || 'agenda kasual',
             targets: [fromJid],
             mediaPath: localPath,
             mediaType: messageType === 'imageMessage' ? 'image' : 'video',
