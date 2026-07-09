@@ -186,35 +186,7 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
     const diffMin = Math.floor(diffMs / (60 * 1000));
     
     let milestones = [];
-    let finalCustomMilestones = customMilestones ? [...customMilestones] : [];
     
-    // MESIN LOOPING MAJU UNTUK MENGUNCI BATAS AWAL TANGGAL DARI USER YAN BRAY
-    if (withDailyReminder && targetTanggal) {
-        const [dHour, dMin] = (dailyReminderTime && dailyReminderTime.includes(':')) ? dailyReminderTime.split(':').map(Number) : [20, 0];
-        
-        let loopDate = dailyReminderStartDate 
-            ? new Date(`${dailyReminderStartDate}T00:00:00+07:00`) 
-            : new Date(now.getTime());
-            
-        let endLoopDate = new Date(targetDate.getTime());
-        
-        // Bersihkan komponen jam agar murni melakukan perulangan tanggal kalender bray
-        let dStart = new Date(loopDate.getFullYear(), loopDate.getMonth(), loopDate.getDate());
-        let dEnd = new Date(endLoopDate.getFullYear(), endLoopDate.getMonth(), endLoopDate.getDate());
-        
-        while (dStart <= dEnd) {
-            let dailyReminderDate = new Date(`${dStart.getFullYear()}-${String(dStart.getMonth() + 1).padStart(2, '0')}-${String(dStart.getDate()).padStart(2, '0')}T${String(dHour).padStart(2, '0')}:${String(dMin).padStart(2, '0')}:00+07:00`);
-            
-            if (dailyReminderDate.getTime() > now.getTime() && dailyReminderDate.getTime() <= targetDate.getTime()) {
-                const dailyDiffMin = Math.floor((targetDate.getTime() - dailyReminderDate.getTime()) / (60 * 1000));
-                if (dailyDiffMin >= 0 && !finalCustomMilestones.includes(dailyDiffMin)) {
-                    finalCustomMilestones.push(dailyDiffMin);
-                }
-            }
-            dStart.setDate(dStart.getDate() + 1);
-        }
-    }
-
     const buatLabelJamDinamis = (menitMundur) => {
         if (menitMundur === 0) return `waktu utama`;
         if (menitMundur >= 1440) {
@@ -224,9 +196,26 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
         return `${menitMundur} menit lagi menuju jam (${waktuTarget})`;
     };
 
-    if (finalCustomMilestones.length > 0) {
-        finalCustomMilestones.forEach(min => {
-            if (min <= diffMin) {
+    // SIRKUIT 1: EKSEKUSI JALUR INTERVAL PER MENIT JIKA AKTIF
+    if (intervalMin && intervalMin > 0) {
+        if (diffMin > 0) {
+            for (let minRemaining = 0; minRemaining <= diffMin; minRemaining += intervalMin) {
+                if (!milestones.some(m => m.totalMinutes === minRemaining)) {
+                    milestones.push({
+                        type: 'durasi',
+                        totalMinutes: minRemaining,
+                        label: buatLabelJamDinamis(minRemaining),
+                        isAuto: minRemaining === 0
+                    });
+                }
+            }
+        }
+    } 
+
+    // SIRKUIT 2: EKSEKUSI JALUR KUSTOM ALARM HARI H JIKA ADA
+    if (customMilestones && customMilestones.length > 0) {
+        customMilestones.forEach(min => {
+            if (min <= diffMin && !milestones.some(m => m.totalMinutes === min)) {
                 milestones.push({
                     type: 'durasi',
                     totalMinutes: min,
@@ -235,22 +224,42 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
                 });
             }
         });
-        if (!milestones.some(m => m.totalMinutes === 0)) {
-            milestones.push({ type: 'durasi', totalMinutes: 0, label: buatLabelJamDinamis(0), isAuto: true });
+    }
+
+    // VALIASI PARADOKS: Matikan otomatis pelacakan harian jika targetnya adalah hari ini bray
+    const tanggalHariIniStr = `${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}`;
+    const amanWithDailyReminder = (targetTanggal === tanggalHariIniStr) ? false : withDailyReminder;
+
+    // SIRKUIT 3: EKSEKUSI JALUR HARIAN BERTAHAP JIKA LULUS VALIDASI KALENDER
+    if (amanWithDailyReminder && targetTanggal) {
+        const [dHour, dMin] = (dailyReminderTime && dailyReminderTime.includes(':')) ? dailyReminderTime.split(':').map(Number) : [20, 0];
+        let loopDate = dailyReminderStartDate ? new Date(`${dailyReminderStartDate}T00:00:00+07:00`) : new Date(now.getTime());
+        let endLoopDate = new Date(targetDate.getTime());
+        
+        let dStart = new Date(loopDate.getFullYear(), loopDate.getMonth(), loopDate.getDate());
+        let dEnd = new Date(endLoopDate.getFullYear(), endLoopDate.getMonth(), endLoopDate.getDate());
+        
+        while (dStart <= dEnd) {
+            let dailyReminderDate = new Date(`${dStart.getFullYear()}-${String(dStart.getMonth() + 1).padStart(2, '0')}-${String(dStart.getDate()).padStart(2, '0')}T${String(dHour).padStart(2, '0')}:${String(dMin).padStart(2, '0')}:00+07:00`);
+            
+            if (dailyReminderDate.getTime() > now.getTime() && dailyReminderDate.getTime() <= targetDate.getTime()) {
+                const dailyDiffMin = Math.floor((targetDate.getTime() - dailyReminderDate.getTime()) / (60 * 1000));
+                if (dailyDiffMin >= 0 && !milestones.some(m => m.totalMinutes === dailyDiffMin)) {
+                    milestones.push({
+                        type: 'durasi',
+                        totalMinutes: dailyDiffMin,
+                        label: buatLabelJamDinamis(dailyDiffMin),
+                        isAuto: dailyDiffMin === 0
+                    });
+                }
+            }
+            dStart.setDate(dStart.getDate() + 1);
         }
-    } else {
-        let step = (intervalMin && intervalMin > 0) ? intervalMin : 0;
-        if (diffMin <= 0 || step === 0) {
-            return [{ type: 'durasi', totalMinutes: 0, label: buatLabelJamDinamis(0), isAuto: true }];
-        }
-        for (let minRemaining = 0; minRemaining <= diffMin; minRemaining += step) {
-            milestones.push({
-                type: 'durasi',
-                totalMinutes: minRemaining,
-                label: buatLabelJamDinamis(minRemaining),
-                isAuto: minRemaining === 0
-            });
-        }
+    }
+
+    // KATUP PENGAMAN UTAMA: Pastikan menit ke-0 selaku waktu masuk acara selalu wajib hadir bray
+    if (!milestones.some(m => m.totalMinutes === 0)) {
+        milestones.push({ type: 'durasi', totalMinutes: 0, label: buatLabelJamDinamis(0), isAuto: true });
     }
 
     return milestones.sort((a, b) => b.totalMinutes - a.totalMinutes);
@@ -1703,9 +1712,46 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                             }
                         });
 
+                        // ====================================================================
+                        // SISTEM PEMBERSIH OTOMATIS: PENJAGA KONSISTENSI DATA PASCA-EDIT BRAY
+                        // ====================================================================
+                        const komponenSekarang = getJakartaDateComponents(new Date());
+                        const stringHariIni = `${komponenSekarang.year}-${komponenSekarang.month.padStart(2, '0')}-${komponenSekarang.day.padStart(2, '0')}`;
+
+                        // Saringan A: Jika tanggal diubah jadi hari ini, sapu bersih seluruh paket harian menuju hari H
+                        if (state.data.tanggal === stringHariIni) {
+                            state.data.withDailyReminder = false;
+                            state.data.dailyReminderStartDate = null;
+                            state.data.dailyReminderTime = null;
+                        }
+
+                        // Saringan B: Jika user minta interval per menit atau jam, bersihkan milestones kustom hari H
+                        if (params.intervalMinutes && params.intervalMinutes > 0) {
+                            state.data.customMilestones = null;
+                        }
+
+                        // Saringan C: Jika user secara eksplisit membersihkan draf harian via teks
+                        if (params.customMilestones === null && !params.intervalMinutes) {
+                            if (state.data.withDailyReminder && state.data.dailyReminderStartDate) {
+                                const kataKunciHapus = ["rentang", "harian ga ada", "matikan harian", "permenit"];
+                                if (kataKunciHapus.some(kata => text.toLowerCase().includes(kata))) {
+                                    state.data.withDailyReminder = false;
+                                    state.data.dailyReminderStartDate = null;
+                                    state.data.dailyReminderTime = null;
+                                }
+                            }
+                        }
+
+                        // Saringan D: Cegah paradoks tanggal batas awal melompati tanggal target utama
+                        if (state.data.dailyReminderStartDate && state.data.tanggal) {
+                            if (new Date(state.data.dailyReminderStartDate) > new Date(state.data.tanggal)) {
+                                state.data.dailyReminderStartDate = null;
+                                state.data.withDailyReminder = false;
+                            }
+                        }
+
                         // BENTENG PENGAMAN ANTI-BYPASS: Uji kelayakan jumlah deret milestones baru bray
                         const intervalCheck = state.data.intervalMinutes || 1;
-                        const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones, state.data.tanggal, state.data.withDailyReminder, state.data.dailyReminderStartDate, state.data.dailyReminderTime);
 
                         if (testCalculated.length > 30) {
                             // ROLLBACK DATA RAM INSTAN KARENA JEBOL
