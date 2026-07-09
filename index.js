@@ -277,7 +277,7 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
         }
     }
     
-    const intervalVal = data.intervalMinutes || 1;
+    const intervalVal = data.intervalMinutes;
     const milestones = calculateMilestonesArray(
         data.waktu, 
         data.startTime, 
@@ -1535,7 +1535,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         targetTimestamp = targetDate.getTime();
                     }
 
-                    const intervalVal = data.intervalMinutes || 1;
+                    const intervalVal = data.intervalMinutes;
                     const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones, data.tanggal, data.withDailyReminder);
 
                     let targetJidsFinal = [fromJid];
@@ -1751,7 +1751,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         }
 
                         // BENTENG PENGAMAN ANTI-BYPASS: Uji kelayakan jumlah deret milestones baru bray
-                        const intervalCheck = state.data.intervalMinutes || 1;
+                        const intervalCheck = state.data.intervalMinutes;
 
                         if (testCalculated.length > 30) {
                             // ROLLBACK DATA RAM INSTAN KARENA JEBOL
@@ -1894,7 +1894,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
                 }
 
-                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes || 1, intentData.customMilestones, intentData.tanggal, intentData.withDailyReminder, intentData.dailyReminderStartDate, intentData.dailyReminderTime);
+                const calculated = calculateMilestonesArray(intentData.waktu, intentData.startTime, intentData.intervalMinutes, intentData.customMilestones, intentData.tanggal, intentData.withDailyReminder, intentData.dailyReminderStartDate, intentData.dailyReminderTime);
 
                 if (calculated.length > 30) {
                     setState(fromJid, 'interval_correction', { originalData: intentData, count: calculated.length });
