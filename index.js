@@ -288,8 +288,8 @@ async function handleListDetail(sock, fromJid) {
             const listTargetBersih = r.targets.map(t => {
                 if (t === 'group') return 'grup kuliah';
                 const nomorMurni = t.split('@')[0];
-                // Jika JID mengandung potongan nomor owner, paksa default panggil dyan bray
-                const namaKamus = config.accountMapping?.[t] || (t.includes(config.ownerJid.split('@')[0]) ? 'dyan' : '');
+                // Amankan deteksi nama dyan jika target membawa nomor LID enkripsi milik lu bray
+                const namaKamus = config.accountMapping?.[t] || (t.includes('169810692436109') || t.includes(config.ownerJid.split('@')[0]) ? 'dyan' : '');
                 return namaKamus ? `${namaKamus} (${nomorMurni})` : nomorMurni;
             }).join(', ');
             msg += `• target penerima: ${listTargetBersih}\n`;
@@ -890,6 +890,7 @@ async function startBot() {
             
             setupSchedules(sock);
             await initTelegramScraper(sock);
+            await checkDeadlines(sock); // SUNTIKAN INSTAN BIAR AGENDA KADALUARSA LANGSUNG NYAPU PAS BOOTING BRAY
             rl.close();
         }
     });
@@ -1502,16 +1503,16 @@ Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentu
 2. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, skema alarm kustom, template pesan durasi, maupun template pesan sekarang).
 
 Aturan pengubahan parameter objek jika keputusan bernilai "edit":
-- jika user meminta menyamakan nilai parameter (misal: "template durasi samain dengan template eksekusi"), salin isi string template eksekusi yang ada di data draf saat ini ke parameter pesanDurasi.
-- Jika user meminta alarm/pengingat di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
+- Jika user meminta alarm berbasis interval rutin atau permenit (misal: "skema alarm dibikin interval permenit", "interval 1 menit"), isi properti "intervalMinutes" dengan angka menit tersebut, dan set properti "customMilestones" menjadi null bray.
+- Jika user meminta alarm di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
+- Jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
+- Jika user meminta menyamakan nilai parameter (misal: "template durasi samain aja kaya eksekusi"), salin teks kalimat eksekusi yang ada di data draf saat ini untuk dimasukkan ke parameter pesanDurasi. Begitupun sebaliknya jika diminta.
 - Jika user mengubah judul, isi properti "judul" dengan nama agenda baru.
 - Jika user mengubah jam/waktu, isi properti "waktu" dengan format HH:MM digital.
-- Jika user mengubah template pesan durasi (pesan reminder mundur), masukkan teks kalimat barunya ke properti "pesanDurasi".
-- Jika user mengubah template pesan sekarang (pesan waktu eksekusi H-0), masukkan teks kalimat barunya ke properti "pesanNow".
-- Jika user meminta pembatalan/menyalakan laporan kelompok, set properti "withReport" dengan nilai boolean yang sesuai.
-- Jika user meminta mengaktifkan/mematikan pelacakan keaktifan PM, set properti "withTracking" dengan nilai boolean yang sesuai.
-- Jika user meminta target penerima diubah ke dirinya sendiri (seperti: "nomor gue aja", "buat gua"), isi properti "extractedTarget" dengan string murni "sender". Jika merujuk ke nama orang lain, masukkan nama orang tersebut.
-- KHUSUS KOREKSI DATABASE KONTAK: Jika user memerintahkan pembaruan database nomor hp (seperti: "buat dyan tapi nomornya yang ini 628xxx", "sekalian update nomor fizar jadi..."), tangkap data tersebut dan masukkan ke dalam properti objek "update_database_kontak" dengan sub-properti "nama" dan "nomor".
+- Jika user mengubah template pesan durasi, masukkan teks kalimat barunya ke properti "pesanDurasi".
+- Jika user mengubah template pesan sekarang (H-0), masukkan teks kalimat barunya ke property "pesanNow".
+- Jika user meminta target penerima diubah ke dirinya sendiri, isi properti "extractedTarget" dengan string murni "sender". 
+- KHUSUS KOREKSI DATABASE KONTAK: Jika user memerintahkan pembaruan database nomor hp, tangkap data tersebut dan masukkan ke dalam properti objek "update_database_kontak" dengan sub-properti "nama" dan "nomor".
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
@@ -1522,7 +1523,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
     "customMilestones": array atau null,
     "intervalMinutes": number atau null,
     "pesanDurasi": string atau null,
-    "pesanNow": stringTemplate atau null,
+    "pesanNow": string atau null,
     "withReport": boolean atau null,
     "withTracking": boolean atau null,
     "extractedTarget": string atau null
@@ -1548,16 +1549,19 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
 
                     if (updateResult.keputusan === 'edit') {
+                        // SENSOR PEMBARU DATABASE KONTAK KHUSUS OWNER (MENDUKUNG AKUN ENKRIPSI LID LU BRAY)
                         if (updateResult.update_database_kontak) {
                             const dbKontak = updateResult.update_database_kontak;
                             if (dbKontak.nama && dbKontak.nomor) {
                                 const cleanNumOnly = dbKontak.nomor.replace(/[^0-9]/g, '');
                                 const isSelfChanging = senderJid.startsWith(cleanNumOnly);
-                                if (fromJid === config.ownerJid || isSelfChanging) {
+                                const isOwnerSirkel = fromJid === config.ownerJid || fromJid.includes('169810692436109');
+                                
+                                if (isOwnerSirkel || isSelfChanging) {
                                     const formattedJidTarget = `${cleanNumOnly}@s.whatsapp.net`;
                                     config.accountMapping[formattedJidTarget] = dbKontak.nama.toLowerCase();
                                     saveConfig(config);
-                                    console.log(`[database] sukses update kontak via draf kasual: ${dbKontak.nama} -> ${cleanNumOnly}`);
+                                    console.log(`[database] sukses update kontak: ${dbKontak.nama} -> ${cleanNumOnly}`);
                                 } else {
                                     await sock.sendMessage(fromJid, { text: `gagal update nomor orang lain bray, hak akses database kontak dikunci khusus owner sirkel kuliah.` }, { quoted: msg });
                                 }
@@ -1565,18 +1569,16 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         }
 
                         const params = updateResult.parameter_berubah || {};
-                        // MATRIKS SINKRONISASI MUTASI RAM: Mencegah terhapusnya milestones kustom bray
-                        if (params.customMilestones === null && params.intervalMinutes === null) {
-                            delete params.customMilestones;
-                            delete params.intervalMinutes;
-                        }
+                        
+                        // EKSEKUSI MUTASI PARAMETER RAM SECARA SELEKTIF YAN
                         Object.keys(params).forEach(key => {
                             if (params[key] !== undefined && params[key] !== null) {
                                 state.data[key] = params[key];
                             } else if (params[key] === null && (key === 'intervalMinutes' || key === 'customMilestones')) {
-                                state.data[key] = null; 
+                                state.data[key] = null; // Izinkan null jika AI sengaja ingin menghapus salah satu skema bray
                             }
                         });
+                        
                         await sendDetailedConfirmation(sock, fromJid, state.data, msg);
                         return;
                     }
