@@ -614,7 +614,6 @@ async function initializeTeamTracking(sock, groupJid, config) {
 
 async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
     try {
-        // AMBIL JID TARGET KAMAR INDEPENDEN YANG TERSIMPAN DI REMINDER BRAY bray
         const targetGrupJid = reminder.groupJidTarget || config.groupJid;
         if (!targetGrupJid) return;
 
@@ -631,15 +630,20 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
         const groupMeta = groupCache[targetGrupJid];
         const members = groupMeta.participants || [];
         
-        const tugasAnggotaPromises = members.map(async (member, idx) => {
+        // JALUR SEKUENSIAL: Paksa peladen memproses kepala nomor satu per satu secara antrean bray
+        for (const member of members) {
             const memberJid = member.id;
-            if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) return;
-            if (reminder.scope === 'tertarget' && !reminder.targets.includes(memberJid)) return;
+            
+            // Lewati bot dan nomor lu selaku owner sirkel bray bray
+            if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) continue;
+            if (reminder.scope === 'tertarget' && !reminder.targets.includes(memberJid)) continue;
 
             const userTrack = reminder.teamTracking[memberJid] || { status: 'Belum Respon' };
-            if (userTrack.status === 'Absen') return;
+            if (userTrack.status === 'Absen') continue;
 
-            await new Promise(r => setTimeout(r, idx * (3000 + Math.random() * 1000)));
+            // TAHAP 1: Pasang jeda waktu acak sebelum bot mulai melirik nomor target baru bray
+            const jedaIstirahatManusiawi = 2000 + Math.random() * 3000; // Jeda acak antara 2 sampai 5 detik bray
+            await new Promise(r => setTimeout(r, jedaIstirahatManusiawi));
 
             const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes, groupJidTarget: targetGrupJid };
             const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
@@ -651,32 +655,35 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
             if (userTrack.status === 'Belum Respon') {
                 catatanKaki = `\n\n*catatan:* balas pesan pribadi ini buat ngasih konfirmasi keaktifan lu di grup ya bray.`;
             } else if (userTrack.status === 'Abu-Abu') {
-                catatanKaki = `\n\n*catatan:* kemaren kan lu bilang gatau, gimana jadinya bray? sekarang udah bisa dipastikan belum? bales ya!`;
+                catatanKaki = `\n\n*catatan:* kemaren kan lu billing gatau, gimana jadinya bray? sekarang udah bisa dipastikan belum? bales ya!`;
             } else if (userTrack.status === 'Hadir') {
                 catatanKaki = `\n\n_lu kan udah konfirmasi hadir tadi, jadi tinggal stand by aja ya pas mulai, mantap bray!_`;
             }
 
             const pesanFinal = `${text}${catatanKaki}`;
 
+            // TAHAP 2: Kirim sapaan pendek nama panggilan sebagai pemicu awal bray bray
             const namaPanggilan = getNick(memberJid, member.pushName || 'bray', config, 'variant', targetGrupJid);
             await sock.sendMessage(memberJid, { text: namaPanggilan.toLowerCase() });
 
+            // TAHAP 3: Beri jeda simulasi seolah-olah bot emang lagi ngetik pesannya yan
             await new Promise(r => setTimeout(r, 1000));
-
             await sock.sendPresenceUpdate('composing', memberJid);
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500)); // Jeda ngetik dinamis
             
+            // TAHAP 4: Pesan laporan utama resmi diledakkan ke chat pribadi target
             const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinal });
             
             if (reminder.teamTracking[memberJid]) {
                 reminder.teamTracking[memberJid].lastMsgId = sentMsg.key.id;
             }
-        });
+            
+            console.log(`[antrean sekuensial] sukses meneror chat pribadi ke target: ${namaPanggilan}`);
+        }
 
-        await Promise.all(tugasAnggotaPromises);
         saveConfig(config);
     } catch (err) {
-        console.error('gagal distribusi ke tim:', err);
+        console.error('gagal distribusi sekuensial ke tim:', err);
     }
 }
 
