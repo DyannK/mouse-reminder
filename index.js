@@ -1132,24 +1132,25 @@ async function startBot() {
         // ====================================================================
         const apakahMintaAktif = lowText.includes('/botaktif');
         const automakerMintaPasif = lowText.includes('/botpasif');
-        const apakahOwnerYgNgetik = fromJid === config.ownerJid || senderJid === config.ownerJid;
+        const apakahOwnerYgNgetIK = fromJid === config.ownerJid || senderJid === config.ownerJid;
 
         if (isGroup && !isBotActiveInGroup) {
-            if (apakahMintaAktif && apakahOwnerYgNgetik) {
+            if (apakahMintaAktif && apakahOwnerYgNgetIK) {
                 config.activatedGroups.push(fromJid);
                 saveConfig(config);
                 await sock.sendMessage(fromJid, { text: '🔊 *[sirkuit otak diaktifkan]*\nhalo bray! bot resmi mencair dan stand by mengawal sirkel kamar grup ini sekarang!' }, { quoted: msg });
                 return;
             }
             
-            // Cetak peringatan di konsol Termux lo jika ada chat masuk pas bot masih beku
-            if (isBotMentioned) {
+            // TAMENG AMAN: Kita hitung langsung deteksi mention lokal di sini biar ga memicu ReferenceError bray
+            const apakahBotDimentionLokal = text && (lowText.includes('bot') || (botJidNumber && lowText.includes(botJidNumber)) || msg.mentionedJid?.includes(botJidNumber));
+            if (apakahBotDimentionLokal) {
                 console.log(`⚠️ [PEMBERITAHUAN] Pesan dari grup ini diabaikan peladen karena statusnya masih beku bray.`);
             }
-            return; // Katup pengunci total agar bot tidak merespon chat lain sebelum aktif
+            return; // Katup pengunci total agar bot tidak merespon chat lain sebelum aktif bray bray
         }
 
-        if (isGroup && automakerMintaPasif && apakahOwnerYgNgetik) {
+        if (isGroup && automakerMintaPasif && apakahOwnerYgNgetIK) {
             config.activatedGroups = config.activatedGroups.filter(g => g !== fromJid);
             saveConfig(config);
             await sock.sendMessage(fromJid, { text: '🔕 *[sirkuit otak dibekukan]*\nbot resmi masuk mode tidur senyap bray. panggil owner buat ketik /botaktif lagi kalo mau nyalain.' }, { quoted: msg });
