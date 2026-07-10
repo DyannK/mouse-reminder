@@ -1874,6 +1874,19 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         targetTimestamp = targetDate.getTime();
                     }
 
+                    // SIRKUIT KALKULASI MILESTONES YANG KELUPAAN BRAY
+                    const intervalVal = data.intervalMinutes;
+                    const finalMilestones = calculateMilestonesArray(
+                        data.waktu, 
+                        data.startTime, 
+                        intervalVal, 
+                        data.customMilestones, 
+                        data.tanggal, 
+                        data.withDailyReminder, 
+                        data.dailyReminderStartDate, 
+                        data.dailyReminderTime
+                    );
+
                     let targetJidsFinal = [fromJid];
                     let finalScope = isGroup ? 'group' : 'personal';
 
