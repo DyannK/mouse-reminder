@@ -512,10 +512,14 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
 }
 
 async function deliverToJids(sock, reminder, targetTextMap) {
-    for (const [jid, text] of Object.entries(targetTextMap)) {
+    // Jalankan seluruh pengiriman secara paralel berseling biar ga mengular sekuensial bray
+    const pengirimanPromises = Object.entries(targetTextMap).map(async ([jid, text], idx) => {
         try {
+            // JANGKAR STAGGER: Beri jeda luncur bertahap antar kepala nomor tanpa memblokir thread utama
+            await new Promise(r => setTimeout(r, idx * (1500 + Math.random() * 1000)));
+
             await sock.sendPresenceUpdate('composing', jid);
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+            await new Promise(r => setTimeout(r, 1500));
 
             if (reminder.mediaPath && fs.existsSync(reminder.mediaPath)) {
                 const mediaBuffer = fs.readFileSync(reminder.mediaPath);
@@ -531,8 +535,9 @@ async function deliverToJids(sock, reminder, targetTextMap) {
         } catch (err) {
             console.error(`[${reminder.id}] gagal kirim ke ${jid}:`, err);
         }
-        await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-    }
+    });
+
+    await Promise.all(pengirimanPromises);
 }
 
 // ====================================================================
@@ -573,13 +578,11 @@ async function initializeTeamTracking(sock, groupJid, config) {
 
 async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
     try {
-        // Otomatis setup data tracking baru jika memori kelompok masih kosong bersih bray
         if (!reminder.teamTracking || Object.keys(reminder.teamTracking).length === 0) {
             reminder.teamTracking = await initializeTeamTracking(sock, config.groupJid, config);
             saveConfig(config);
         }
 
-        // Ambil data metadata dari gembok cache lokal biar ga nembak API server terus
         if (!groupCache[config.groupJid]) {
             groupCache[config.groupJid] = await sock.groupMetadata(config.groupJid);
             setTimeout(() => { delete groupCache[config.groupJid]; }, 10 * 60 * 1000);
@@ -588,17 +591,17 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
         const groupMeta = groupCache[config.groupJid];
         const members = groupMeta.participants || [];
         
-        for (const member of members) {
+        // DISTRIBUSI ELEKTRONIK PARALEL: Tembak interogasi secara bertahap bersamaan yan bray
+        const tugasAnggotaPromises = members.map(async (member, idx) => {
             const memberJid = member.id;
-            if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) continue;
-
-            // KATUP PENYARING JID KHUSUS SCOPE TERTARGET YAN BRAY!
-            if (reminder.scope === 'tertarget' && !reminder.targets.includes(memberJid)) continue;
+            if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) return;
+            if (reminder.scope === 'tertarget' && !reminder.targets.includes(memberJid)) return;
 
             const userTrack = reminder.teamTracking[memberJid] || { status: 'Belum Respon' };
+            if (userTrack.status === 'Absen') return;
 
-            // STRATEGI 1: JIKA ANGGOTA SUDAH PASTI ABSEN (SELESAI INTEROGASI), LANGSUNG LEWATI
-            if (userTrack.status === 'Absen') continue;
+            // KATUP JEDA AMAN WHATSAPP: Luncurkan stagger 3.5 detik per kepala biar ga kedeteksi spam bot
+            await new Promise(r => setTimeout(r, idx * (3000 + Math.random() * 1000)));
 
             const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes };
             const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
@@ -606,42 +609,35 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
 
             let { text } = await resolveTemplateForJid(messageTemplate, manualFallback, memberJid, context, reminder.formal);
             
-            // STRATEGI 2: PENYUSUNAN CATATAN KAKI DINAMIS BERDASARKAN STATUS
             let catatanKaki = '';
             if (userTrack.status === 'Belum Respon') {
                 catatanKaki = `\n\n*catatan:* balas pesan pribadi ini buat ngasih konfirmasi keaktifan lu di grup ya bray.`;
             } else if (userTrack.status === 'Abu-Abu') {
                 catatanKaki = `\n\n*catatan:* kemaren kan lu bilang gatau, gimana jadinya bray? sekarang udah bisa dipastikan belum? bales ya!`;
             } else if (userTrack.status === 'Hadir') {
-                // Tetap diingatkan tapi tanpa todongan catatan kaku (diganti teks apresiasi standby)
                 catatanKaki = `\n\n_lu kan udah konfirmasi hadir tadi, jadi tinggal stand by aja ya pas mulai, mantap bray!_`;
             }
 
             const pesanFinal = `${text}${catatanKaki}`;
 
-            // STRATEGI 3: GELEMBUNG 1 - PANGGIL NAMA KASUAL (SIMULASI ALAMI)
+            // Gelembung 1 - Sapaan
             const namaPanggilan = getNick(memberJid, member.pushName || 'bray', config, 'variant');
             await sock.sendMessage(memberJid, { text: namaPanggilan.toLowerCase() });
 
-            // Jeda tunggu rileks antar gelembung di dalam room chat yang sama
-            await new Promise(r => setTimeout(r, 1500 + Math.random() * 1000));
+            await new Promise(r => setTimeout(r, 1000));
 
-            // STRATEGI 4: GELEMBUNG 2 - ISI TEMPLATE PENGINGAT UTAMA
+            // Gelembung 2 - Isi
             await sock.sendPresenceUpdate('composing', memberJid);
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
+            await new Promise(r => setTimeout(r, 1500));
             
-            // HAPUS .toLowerCase() DI SINI AGAR ISTILAH SEPERTI FIFO/LIFO TETAP AMAN KAPITAL BRAY!
             const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinal });
             
-            // Simpan id pesan terakhir ke database untuk pelacakan centang satu nanti
             if (reminder.teamTracking[memberJid]) {
                 reminder.teamTracking[memberJid].lastMsgId = sentMsg.key.id;
             }
+        });
 
-            // JEDA PENGAMAN ANTAR KEPALA NOMOR KELOMPOK (Dibuat lebih lama dan acak biar natural bray)
-            await new Promise(r => setTimeout(r, 7000 + Math.random() * 5000));
-        }
-        
+        await Promise.all(tugasAnggotaPromises);
         saveConfig(config);
     } catch (err) {
         console.error('gagal distribusi ke tim:', err);
@@ -829,6 +825,15 @@ async function checkDeadlines(sock) {
                     const milestoneTerakhir = missedMilestonesThisRun[missedMilestonesThisRun.length - 1];
                     await handleGroupTeamDistribution(sock, reminder, milestoneTerakhir, config);
                 }
+
+                // SIRKUIT DARURAT: Picu laporan akhir kelompok jika agenda utama terlewat pas server mati bray
+                if (missedMilestonesThisRun.some(m => m.isAuto) && (reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withReport !== false) {
+                    setTimeout(async () => {
+                        const freshConfig = loadConfig();
+                        const freshReminder = freshConfig.reminders.find(r => r.id === reminder.id) || reminder;
+                        await generateAndSendTeamReport(sock, freshReminder, freshConfig);
+                    }, 5 * 60 * 1000); // Beri jeda 5 menit setelah server pulih biar sisa anak-anak sempat absen bray
+                }
             }
 
             // ====================================================================
@@ -936,7 +941,9 @@ function setupSchedules(sock) {
         scheduledTasks.push(task);
     });
 
-    scheduledTasks.push(cron.schedule('* * * * *', () => checkDeadlines(sock), { timezone: 'Asia/Jakarta' }));
+    // Ubah detakan kaku 1 menit cron menjadi sirkuit interval peka 10 detik sekali bray bray
+    const deadlineTimer = setInterval(() => checkDeadlines(sock), 10 * 1000);
+    scheduledTasks.push({ stop: () => clearInterval(deadlineTimer) });
 
     // ====================================================================
     // KATUP AUTO-DELETE: PEMBERSIH UTAMAA FILE MEDIA TG SETELAH 1 HARI YAN
