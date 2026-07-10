@@ -547,14 +547,22 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
 }
 
 async function deliverToJids(sock, reminder, targetTextMap) {
-    // Jalankan seluruh pengiriman secara paralel berseling biar ga mengular sekuensial bray
-    const pengirimanPromises = Object.entries(targetTextMap).map(async ([jid, text], idx) => {
+    const entries = Object.entries(targetTextMap);
+    
+    // Rombak total Promise.all menjadi perulangan for-of sekuensial murni bray
+    for (let i = 0; i < entries.length; i++) {
+        const [jid, text] = entries[i];
         try {
-            // JANGKAR STAGGER: Beri jeda luncur bertahap antar kepala nomor tanpa memblokir thread utama
-            await new Promise(r => setTimeout(r, idx * (1500 + Math.random() * 1000)));
+            // Beri jeda luncur antar target kepala nomor biar ga barengan
+            if (i > 0) await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
 
-            await sock.sendPresenceUpdate('composing', jid);
-            await new Promise(r => setTimeout(r, 1500));
+            // Jaring pengaman presens update: biar kalau server wa nolak, bot ga ikut mati total bray
+            try {
+                await sock.sendPresenceUpdate('composing', jid);
+                await new Promise(r => setTimeout(r, 1500));
+            } catch (presenceErr) {
+                console.log(`[presence-skip] server wa sibuk, langsung skip composing buat ${jid}`);
+            }
 
             if (reminder.mediaPath && fs.existsSync(reminder.mediaPath)) {
                 const mediaBuffer = fs.readFileSync(reminder.mediaPath);
@@ -566,13 +574,11 @@ async function deliverToJids(sock, reminder, targetTextMap) {
             } else {
                 await sock.sendMessage(jid, { text });
             }
-            console.log(`[${reminder.id}] terkirim ke ${jid}`);
+            console.log(`[${reminder.id}] sukses mendarat ke target ${jid}`);
         } catch (err) {
-            console.error(`[${reminder.id}] gagal kirim ke ${jid}:`, err);
+            console.error(`[${reminder.id}] gagal kirim ke ${jid}:`, err.message);
         }
-    });
-
-    await Promise.all(pengirimanPromises);
+    }
 }
 
 // ====================================================================
@@ -734,7 +740,8 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
             const userTrack = reminder.teamTracking[memberJid] || { status: 'Belum Respon' };
             if (userTrack.status === 'Absen') continue;
 
-            const jedaIstirahatManusiawi = 2000 + Math.random() * 3000;
+            // JEDA AMAN KELOMPOK: Naikkan waktu istirahat biar bot lo terlihat manusiawi bray bray
+            const jedaIstirahatManusiawi = 4000 + Math.random() * 3000;
             await new Promise(r => setTimeout(r, jedaIstirahatManusiawi));
 
             const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes, groupJidTarget: targetGrupJid };
@@ -752,16 +759,19 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
                 catatanKaki = `\n\n_lu kan udah konfirmasi hadir tadi, jadi tinggal stand by aja ya pas mulai, mantap bray!_`;
             }
 
-            const pesanFinal = `${text}${catatanKaki}`;
-
+            // KUNCI STRATEGIS ANTI-BAN: Satukan panggilan nama dan isi teks tugas dalam SATU paket bubble bray!
             const namaPanggilan = getNick(memberJid, member.pushName || 'bray', config, 'variant', targetGrupJid);
-            await sock.sendMessage(memberJid, { text: namaPanggilan.toLowerCase() });
+            const pesanFinalGabung = `${namaPanggilan.toLowerCase()},\n\n${text}${catatanKaki}`;
 
-            await new Promise(r => setTimeout(r, 1000));
-            await sock.sendPresenceUpdate('composing', memberJid);
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
+            try {
+                await sock.sendPresenceUpdate('composing', memberJid);
+                await new Promise(r => setTimeout(r, 2000));
+            } catch (e) {
+                console.log(`[presence-skip] gagal composing ke nomor personal tim`);
+            }
             
-            const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinal });
+            // Eksekusi pelepasan satu peluru chat murni mendarat di database bray
+            const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinalGabung });
             
             if (reminder.teamTracking[memberJid]) {
                 reminder.teamTracking[memberJid].lastMsgId = sentMsg.key.id;
