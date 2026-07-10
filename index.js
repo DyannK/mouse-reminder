@@ -1394,6 +1394,7 @@ async function startBot() {
                 return;
             }
             
+            
             // ====================================================================
             // PERINTAH UTAMA: INTIP 10 LIST CHAT TERAKHIR DI TELEGRAM BRAY
             // ====================================================================
@@ -1428,9 +1429,6 @@ async function startBot() {
                 return;
             }
 
-            // ====================================================================
-            // PERINTAH UTAMA: FORWARD PESAN PILIHAN BERDASARKAN ID NYA YAN
-            // ====================================================================
             // ====================================================================
             // PERINTAH UTAMA: FORWARD PESAN PILIHAN BERDASARKAN ID NYA YAN
             // ====================================================================
@@ -1490,6 +1488,7 @@ async function startBot() {
                 await sock.sendMessage(fromJid, { text: `📋 *[VERIFIKASI MANUAL BACKEND]*\nsistem menerjemahkan perintah manual lu:\n• tipe: rutin berulang\n• pola kerja: ${humanDesc}\n• muatan pesan: "${pesan}"\n\nagenda langsung diamankan ke scheduler.` });
             }
 
+            // BARU TERAKHIR PANGGIL COMMAND HANDLER
             await handleCommand(sock, text, fromJid, () => setupSchedules(sock));
             return;
         }
