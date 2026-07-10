@@ -2152,22 +2152,20 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 let pesanBalasanFinal = '';
                 
                 if (isGroup) {
-                    if (groupChatMemory[fromJid].length < 5) {
-                        const restartPrompt = `Lu adalah asisten kelompok kuliah yang santai. Server lu baru aja restart sehingga memori obrolan lokal lu kosong bersih. Berikan respon maaf kasual dengan gaya lu-gue, santai, huruf kecil semua bray, menyampaikan kalimat "gue gatau bray servernya baru aja restart wkwk jadi ga nyimak percakapan lo pada sorry yaaa".`;
-                        
-                        const { generateAIText } = require('./geminiClient');
-                        const aiRestartRes = await generateAIText(restartPrompt, {}, '', 'gue gatau bray servernya baru aja restart wkwk jadi ga nyimak percakapan lo pada sorry yaaa', false);
-                        
-                        await sock.sendMessage(fromJid, { text: aiRestartRes.text.trim() }, { quoted: msg });
-                        return;
-                    }
-
-                    const transkripObrolan = groupChatMemory[fromJid].map(c => `[${c.sender}]: ${c.text}`).join('\n');
+                    // JALUR KASUAL: Langsung petakan transkrip apa adanya tanpa memblokir chat pake notice bray
+                    const transkripObrolan = groupChatMemory[fromJid] && groupChatMemory[fromJid].length > 0
+                        ? groupChatMemory[fromJid].map(c => `[${c.sender}]: ${c.text}`).join('\n')
+                        : '(belum ada lini percakapan terekam sebelum chat ini bray)';
                     
-                    const opiniPrompt = `Lu adalah anggota kelompok kuliah yang cerdas, solutif, dan menyimak dinamika obrolan grup dari pojokan room chat. Hari ini lu ditanya pendapat atau dimintai solusi oleh si ${currentNick} dengan pertanyaan: "${processingText}". Transkrip obrolan anak-anak sebelumnya: \n${transkripObrolan}`;
+                    const opiniPrompt = `Lu adalah anggota kelompok kuliah yang cerdas, solutif, dan menyimak dinamika obrolan grup dari pojokan room chat sirkel kuliah. Hari ini lu diajak mengobrol, ditanya pendapat, atau dimintai solusi oleh si ${currentNick} dengan muatan kalimat pertanyaan: "${processingText}".
+                    
+                    Berikut transkrip baris obrolan singkat anak-anak sebelumnya di kamar ini (urut kronologis dari past ke now):
+                    ${transkripObrolan}
+                    
+                    Aturan gaya tulisan wajib: Kamu harus membalas dengan sangat santai menggunakan gaya bahasa lu-gue anak tongkrongan sehari-hari bray. Wajib gunakan huruf kecil semua untuk seluruh teks keluaran tanpa kecuali bray. Hilangkan total identitas lu sebagai robot, langsung jawab intisari chatnya secara natural bray!`;
                     
                     const { generateAIText } = require('./geminiClient');
-                    const aiOpiniRes = await generateAIText(opiniPrompt, {}, '', 'sori bray otak gue lagi agak nge-lag, coba jelasin intinya aja', false);
+                    const aiOpiniRes = await generateAIText(opiniPrompt, {}, '', 'sori bray otak gue lagi agak nge-lag, coba jelasin intinya aja bray', false);
                     pesanBalasanFinal = aiOpiniRes.text;
                 } else {
                     pesanBalasanFinal = await generateMimicReply(processingText, samples, chatMemory[fromJid] || [], currentNick);
