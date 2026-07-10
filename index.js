@@ -1113,18 +1113,26 @@ async function startBot() {
         let config = loadConfig();
         
         // ====================================================================
-        // MONITOR DEBUGGING TERMUX LIVE MULTI-GROUP
+        // MONITOR DEBUGGING TERMUX LIVE MULTI-GROUP (VERSI EXTENDED ROSTER)
         // ====================================================================
         if (!config.activatedGroups) config.activatedGroups = [];
         const isBotActiveInGroup = config.activatedGroups.includes(fromJid);
         
         if (isGroup) {
-            console.log(`🔍 [DEBUG LIVE MULTI-GROUP]`);
-            console.log(`   • ID Kamar Grup Target : ${fromJid}`);
-            console.log(`   • Nomor JID Pengirim   : ${senderJid}`);
-            console.log(`   • Status Otak Bot      : ${isBotActiveInGroup ? 'CEPAT/AKTIF' : 'BEKU/NONAKTIF'}`);
-            console.log(`   • Isi Teks Mentah      : "${text}"`);
-            console.log(`   • Deteksi Perintah Baku: "${cmd}"`);
+            // Tarik data nama profil wa murni dan status kamus resmi kelompok bray
+            const namaProfilWA = msg.pushName || 'tidak memasang nama';
+            const kamusGrupSekarang = config.groupMappings?.[fromJid] || {};
+            const statusKamusResmi = kamusGrupSekarang[senderJid] ? `RESMI TERDAFTAR ASLI (${kamusGrupSekarang[senderJid]})` : 'BELUM DAFTAR RESMI (ASING)';
+
+            console.log(`\n====================================================`);
+            console.log(`🔍 [DEBUG LIVE SENSOR ROSTER MULTI-GROUP]`);
+            console.log(`   • Kamar Grup Target : ${fromJid}`);
+            console.log(`   • ID JID Pengirim   : ${senderJid}`);
+            console.log(`   • Nama Profil WA    : ${namaProfilWA}`);
+            console.log(`   • Status di Roster  : ${statusKamusResmi}`);
+            console.log(`   • Status Otak Bot   : ${isBotActiveInGroup ? 'CEPAT/AKTIF' : 'BEKU/NONAKTIF'}`);
+            console.log(`   • Isi Teks Mentah   : "${text}"`);
+            console.log(`====================================================\n`);
         }
 
         // ====================================================================
