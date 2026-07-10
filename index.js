@@ -1319,7 +1319,23 @@ async function startBot() {
 
             if (!isLocalDrafCmd) {
                 resetState(fromJid);
+                // --- SINI BRAY: SISIPKAN LOGIKA PENDAFTARAN DISINI SEBELUM HANDLER COMMAND ---
                 const cmd = text.trim().toLowerCase();
+                if (cmd.startsWith('/daftarin')) {
+                    const args = text.slice(9).trim().split(/\s+/);
+                    if (args.length >= 2) {
+                        const nomorTarget = args[0].trim().replace(/[^0-9]/g, '');
+                        const namaTarget = args.slice(1).join(' ').trim();
+                        const formattedJidTarget = `${nomorTarget}@s.whatsapp.net`;
+                        
+                        // Simpan ke database global agar sinkron dimanapun
+                        config.accountMapping[formattedJidTarget] = namaTarget.toLowerCase();
+                        saveConfig(config);
+                        await sock.sendMessage(fromJid, { text: `beres yan, nomor ${nomorTarget} resmi gue catat sebagai *${namaTarget}* di database global bray.` }, { quoted: msg });
+                        return; // Berhenti disini biar gak lari ke handler command yang salah
+                    }
+                }
+                // --- SAMPAI SINI ---
                 if (cmd === '/help') {
                     resetState(fromJid);
                     const menuHelp = `🛠 *PANDUAN LENGKAP PENGGUNAAN ASISTEN REMINDER BOT*\n` +
