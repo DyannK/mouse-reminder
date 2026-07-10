@@ -133,19 +133,16 @@ function getNick(jid, pushName, config, style = 'stable', groupJid = null) {
     let mappedName = null;
     const rawSenderNum = jid.split('@')[0];
 
-    // 1. Cek kamar grup bersarang memakai pencocokan string hibrida
     if (groupJid && config.groupMappings?.[groupJid]) {
         const kamarGrup = config.groupMappings[groupJid];
         mappedName = kamarGrup[jid];
         
         if (!mappedName) {
-            // Jalur pencarian backup jika key terdaftar berupa nomor biasa tapi pengirim memakai LID
             const ketemuKey = Object.keys(kamarGrup).find(k => k.includes(rawSenderNum) || rawSenderNum.includes(k.split('@')[0]));
             if (ketemuKey) mappedName = kamarGrup[ketemuKey];
         }
     }
     
-    // 2. Cek database global menggunakan pencocokan hibrida
     if (!mappedName && config.accountMapping) {
         mappedName = config.accountMapping[jid];
         if (!mappedName) {
@@ -612,87 +609,12 @@ async function initializeTeamTracking(sock, groupJid, config) {
 }
 
 
-async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
-    try {
-        const targetGrupJid = reminder.groupJidTarget || config.groupJid;
-        if (!targetGrupJid) return;
-
-        if (!reminder.teamTracking || Object.keys(reminder.teamTracking).length === 0) {
-            reminder.teamTracking = await initializeTeamTracking(sock, targetGrupJid, config);
-            saveConfig(config);
-        }
-
-        if (!groupCache[targetGrupJid]) {
-            groupCache[targetGrupJid] = await sock.groupMetadata(targetGrupJid);
-            setTimeout(() => { delete groupCache[targetGrupJid]; }, 10 * 60 * 1000);
-        }
-        
-        const groupMeta = groupCache[targetGrupJid];
-        const members = groupMeta.participants || [];
-        
-        // JALUR SEKUENSIAL: Paksa peladen memproses kepala nomor satu per satu secara antrean bray
-        for (const member of members) {
-            const memberJid = member.id;
-            
-            // Lewati bot dan nomor lu selaku owner sirkel bray bray
-            if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) continue;
-            if (reminder.scope === 'tertarget' && !reminder.targets.includes(memberJid)) continue;
-
-            const userTrack = reminder.teamTracking[memberJid] || { status: 'Belum Respon' };
-            if (userTrack.status === 'Absen') continue;
-
-            // TAHAP 1: Pasang jeda waktu acak sebelum bot mulai melirik nomor target baru bray
-            const jedaIstirahatManusiawi = 2000 + Math.random() * 3000; // Jeda acak antara 2 sampai 5 detik bray
-            await new Promise(r => setTimeout(r, jedaIstirahatManusiawi));
-
-            const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes, groupJidTarget: targetGrupJid };
-            const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
-            const manualFallback = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
-
-            let { text } = await resolveTemplateForJid(messageTemplate, manualFallback, memberJid, context, reminder.formal);
-            
-            let catatanKaki = '';
-            if (userTrack.status === 'Belum Respon') {
-                catatanKaki = `\n\n*catatan:* balas pesan pribadi ini buat ngasih konfirmasi keaktifan lu di grup ya bray.`;
-            } else if (userTrack.status === 'Abu-Abu') {
-                catatanKaki = `\n\n*catatan:* kemaren kan lu billing gatau, gimana jadinya bray? sekarang udah bisa dipastikan belum? bales ya!`;
-            } else if (userTrack.status === 'Hadir') {
-                catatanKaki = `\n\n_lu kan udah konfirmasi hadir tadi, jadi tinggal stand by aja ya pas mulai, mantap bray!_`;
-            }
-
-            const pesanFinal = `${text}${catatanKaki}`;
-
-            // TAHAP 2: Kirim sapaan pendek nama panggilan sebagai pemicu awal bray bray
-            const namaPanggilan = getNick(memberJid, member.pushName || 'bray', config, 'variant', targetGrupJid);
-            await sock.sendMessage(memberJid, { text: namaPanggilan.toLowerCase() });
-
-            // TAHAP 3: Beri jeda simulasi seolah-olah bot emang lagi ngetik pesannya yan
-            await new Promise(r => setTimeout(r, 1000));
-            await sock.sendPresenceUpdate('composing', memberJid);
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500)); // Jeda ngetik dinamis
-            
-            // TAHAP 4: Pesan laporan utama resmi diledakkan ke chat pribadi target
-            const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinal });
-            
-            if (reminder.teamTracking[memberJid]) {
-                reminder.teamTracking[memberJid].lastMsgId = sentMsg.key.id;
-            }
-            
-            console.log(`[antrean sekuensial] sukses meneror chat pribadi ke target: ${namaPanggilan}`);
-        }
-
-        saveConfig(config);
-    } catch (err) {
-        console.error('gagal distribusi sekuensial ke tim:', err);
-    }
-}
-
 async function generateAndSendTeamReport(sock, reminder, config) {
     const targetGrupJid = reminder.groupJidTarget || config.groupJid;
     if (!targetGrupJid) return;
 
     let report = `*[laporan akhir keaktifan kelompok]*\nagenda: *[${reminder.judul}]*\n\n`;
-    let laporanMentions = []; // Wadah penampung sirkuit tag biru wa bray
+    let laporanMentions = [];
 
     try {
         if (!groupCache[targetGrupJid]) {
@@ -722,13 +644,12 @@ async function generateAndSendTeamReport(sock, reminder, config) {
             const nomorMurni = jid.split('@')[0];
             let teksSubjekFinal = '';
 
-            // SIRKUIT STRATEGI TAG HIBRIDA: Deteksi akun alay atau belum kenalan bray bray
             if (namaOrang === member.pushName || namaOrang === 'coy' || namaOrang === 'bray') {
-                teksSubjekFinal = `@${nomorMurni}`; // Paksa pake tag biru murni biar otentik bray
+                teksSubjekFinal = `@${nomorMurni}`;
             } else {
-                teksSubjekFinal = `${namaOrang} (@${nomorMurni})`; // Kombinasi nama asli + tag ganda
+                teksSubjekFinal = `${namaOrang} (@${nomorMurni})`;
             }
-            laporanMentions.push(jid); // Daftarkan kunci JID ke sirkuit wa bray
+            laporanMentions.push(jid);
 
             if (track.status === 'Hadir') {
                 listHadir.push(`- ${teksSubjekFinal} (respon: ${track.message || 'bisa'})`);
@@ -756,7 +677,102 @@ async function generateAndSendTeamReport(sock, reminder, config) {
 
         const teksFinalLaporan = report.trim();
         
-        // KUNCI UTAMA: Tembak laporan ke grup lengkap dengan array mentions aktif bray!
+        await sock.sendMessage(targetGrupJid, { text: teksFinalLaporan, mentions: laporanMentions });
+
+        if (!config.reports) config.reports = [];
+        
+        const existingRepIdx = config.reports.findIndex(r => r.agendaId === reminder.id);
+        const reportData = {
+            id: existingRepIdx !== -1 ? config.reports[existingRepIdx].id : `rep_${Date.now().toString().slice(-4)}`,
+            agendaId: reminder.id,
+            judul: reminder.judul,
+            groupJidTarget: targetGrupJid,
+            tanggal: new Date().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }),
+            teks: teksFinalLaporan
+        };
+
+        if (existingRepIdx !== -1) {
+            config.reports[existingRepIdx] = reportData;
+        } else {
+            config.reports.push(reportData);
+        }
+        
+        saveConfig(config);
+        console.log(`[arsip] laporan ${reminder.judul} berhasil disimpan dengan id ${reportData.id}`);
+
+    } catch (err) {
+        console.error('gagal membuat laporan akhir kelompok:', err.message);
+    }
+}
+
+async function generateAndSendTeamReport(sock, reminder, config) {
+    const targetGrupJid = reminder.groupJidTarget || config.groupJid;
+    if (!targetGrupJid) return;
+
+    let report = `*[laporan akhir keaktifan kelompok]*\nagenda: *[${reminder.judul}]*\n\n`;
+    let laporanMentions = [];
+
+    try {
+        if (!groupCache[targetGrupJid]) {
+            groupCache[targetGrupJid] = await sock.groupMetadata(targetGrupJid);
+            setTimeout(() => { delete groupCache[targetGrupJid]; }, 10 * 60 * 1000);
+        }
+
+        const groupMeta = groupCache[targetGrupJid];
+        const members = groupMeta.participants || [];
+        
+        let listHadir = [];
+        let listAbsen = [];
+        let listNgilang = [];
+        let listPasif = [];
+        let listCentangSatu = [];
+        let listGagalServer = [];
+
+        for (const member of members) {
+            const jid = member.id;
+            if (jid.includes(botJidNumber)) continue;
+            if (reminder.scope === 'tertarget' && !reminder.targets.includes(jid)) continue;
+
+            const namaOrang = getNick(jid, member.pushName, config, 'stable', targetGrupJid);
+            const track = reminder.teamTracking?.[jid] || { status: 'Belum Respon', reason: '', isDelivered: true };
+            const apakahAdaMissed = reminder.missedMilestones && reminder.missedMilestones.length > 0;
+
+            const nomorMurni = jid.split('@')[0];
+            let teksSubjekFinal = '';
+
+            if (namaOrang === member.pushName || namaOrang === 'coy' || namaOrang === 'bray') {
+                teksSubjekFinal = `@${nomorMurni}`;
+            } else {
+                teksSubjekFinal = `${namaOrang} (@${nomorMurni})`;
+            }
+            laporanMentions.push(jid);
+
+            if (track.status === 'Hadir') {
+                listHadir.push(`- ${teksSubjekFinal} (respon: ${track.message || 'bisa'})`);
+            } else if (track.status === 'Absen') {
+                listAbsen.push(`- ${teksSubjekFinal} (alasan: ${track.reason || 'ada urusan'})`);
+            } else if (track.status === 'Abu-Abu') {
+                listNgilang.push(`- ${teksSubjekFinal} (awal sempet bilang: ${track.reason || 'gatau'}, abis itu ngilang)`);
+            } else {
+                if (apakahAdaMissed && track.interrogationStage === 0) {
+                    listGagalServer.push(`- ${teksSubjekFinal} (gagal terabsen / server sempat down bray)`);
+                } else if (track.isDelivered === false) {
+                    listCentangSatu.push(`- ${teksSubjekFinal} (nomor ga aktif / centang 1)`);
+                } else {
+                    listPasif.push(`- ${teksSubjekFinal} (silent reader / menyimak)`);
+                }
+            }
+        }
+
+        if (listHadir.length > 0) report += `*✅ anggota hadir/aktif:*\n${listHadir.join('\n')}\n\n`;
+        if (listAbsen.length > 0) report += `*❌ anggota izin/absen:*\n${listAbsen.join('\n')}\n\n`;
+        if (listGagalServer.length > 0) report += `*⚠️ tidak sempat terinterogasi (sistem down):*\n${listGagalServer.join('\n')}\n\n`;
+        if (listNgilang.length > 0) report += `*⚠️ tidak konsisten (ngilang):*\n${listNgilang.join('\n')}\n\n`;
+        if (listPasif.length > 0) report += `*💤 silent reader (pasif):*\n${listPasif.join('\n')}\n\n`;
+        if (listCentangSatu.length > 0) report += `*🚫 nomor tidak aktif (centang 1):*\n${listCentangSatu.join('\n')}\n\n`;
+
+        const teksFinalLaporan = report.trim();
+        
         await sock.sendMessage(targetGrupJid, { text: teksFinalLaporan, mentions: laporanMentions });
 
         if (!config.reports) config.reports = [];
@@ -1156,7 +1172,6 @@ async function startBot() {
         const isBotActiveInGroup = config.activatedGroups.includes(fromJid);
         
         if (isGroup) {
-            // Tarik data nama profil wa murni dan status kamus resmi kelompok bray
             const namaProfilWA = msg.pushName || 'tidak memasang nama';
             const kamusGrupSekarang = config.groupMappings?.[fromJid] || {};
             const statusKamusResmi = kamusGrupSekarang[senderJid] ? `RESMI TERDAFTAR ASLI (${kamusGrupSekarang[senderJid]})` : 'BELUM DAFTAR RESMI (ASING)';
@@ -1178,7 +1193,6 @@ async function startBot() {
         const apakahMintaAktif = lowText.includes('/botaktif');
         const automakerMintaPasif = lowText.includes('/botpasif');
         
-        // TAMENG HIBRIDA: Cek kesamaan string kaku, nomor murni, atau ID LID unik milik lu yan bray
         const apakahOwnerYgNgetIK = fromJid === config.ownerJid || 
                                     senderJid === config.ownerJid || 
                                     senderJid.includes('169810692436109') ||
@@ -1204,6 +1218,65 @@ async function startBot() {
             saveConfig(config);
             await sock.sendMessage(fromJid, { text: '🔕 *[sirkuit otak dibekukan]*\nbot resmi masuk mode tidur senyap bray. panggil owner buat ketik /botaktif lagi kalo mau nyalain.' }, { quoted: msg });
             return;
+        }
+
+        // ====================================================================
+        // INTERCEPTOR KASUAL: HAPUS AGENDA SECARA OTOMATIS TANPA SLASH BRAY
+        // ====================================================================
+        let isBotMentionedLokal = text && (text.includes(botJidNumber) || lowText.includes('bot') || msg.mentionedJid?.includes(botJidNumber));
+        const polaHapusKasual = (!isGroup || isBotMentionedLokal) && 
+                                (lowText.includes('hapus') || lowText.includes('delete') || lowText.includes('apus')) && 
+                                (lowText.includes('agenda') || lowText.includes('jadwal') || lowText.includes('id'));
+
+        if (polaHapusKasual) {
+            const matchId = text.match(/(ai_\d{4}|rec_\d{4})/i);
+            if (matchId) {
+                const idTarget = matchId[0].toLowerCase();
+                const idxApus = config.reminders.findIndex(r => r.id === idTarget);
+                
+                if (idxApus !== -1) {
+                    const judulTerhapus = config.reminders[idxApus].judul;
+                    config.reminders.splice(idxApus, 1);
+                    saveConfig(config);
+                    setupSchedules(sock);
+                    await sock.sendMessage(fromJid, { text: `beres yan, agenda "${judulTerhapus}" (ID: ${idTarget}) udah gue apus permanen dari database bray.` }, { quoted: msg });
+                    return;
+                } else {
+                    await sock.sendMessage(fromJid, { text: `agenda dengan id [${idTarget}] ga ketemu di database bray, coba cek listdetail lagi.` }, { quoted: msg });
+                    return;
+                }
+            }
+        }
+
+        // ====================================================================
+        // INTERCEPTOR MUTLAK: PENDAFTARAN ROSTER SEBELUM DISENTUH AI GEMINI
+        // ====================================================================
+        const polaDaftarKasual = lowText.startsWith('daftarin ') || text.startsWith('/daftarin ');
+        
+        if (polaDaftarKasual && apakahOwnerYgNgetIK) {
+            const argumenTeks = text.replace(/\/daftarin|daftarin/gi, '').trim().split(/\s+/);
+            
+            if (argumenTeks.length >= 2) {
+                const nomorMurni = argumenTeks[0].trim().replace(/[^0-9]/g, '');
+                const namaTarget = argumenTeks.slice(1).join(' ').trim().toLowerCase();
+                const jidFormatFormat = `${nomorMurni}@s.whatsapp.net`;
+                
+                if (!config.groupMappings) config.groupMappings = {};
+                
+                if (isGroup) {
+                    if (!config.groupMappings[fromJid]) config.groupMappings[fromJid] = {};
+                    config.groupMappings[fromJid][jidFormatFormat] = namaTarget;
+                    config.groupMappings[fromJid][senderJid] = namaTarget; 
+                    saveConfig(config);
+                    await sock.sendMessage(fromJid, { text: `beres yan, nomor hp ${nomorMurni} resmi gue kunci sebagai *${namaTarget}* di kamar grup ini!` }, { quoted: msg });
+                } else {
+                    config.accountMapping[jidFormatFormat] = namaTarget;
+                    config.accountMapping[senderJid] = namaTarget;
+                    saveConfig(config);
+                    await sock.sendMessage(fromJid, { text: `beres yan, nomor hp ${nomorMurni} resmi dicatat sebagai *${namaTarget}* di database global bray!` }, { quoted: msg });
+                }
+                return;
+            }
         }
 
         // Perbaiki variabel penyaring laporan agar sinkron ke bawah yan
@@ -1350,185 +1423,311 @@ async function startBot() {
         // }
 
         // 1. GERBANG MANUAL UTAMA (SLASH INTERCEPTOR)
+        // 1. GERBANG MANUAL UTAMA (SLASH INTERCEPTOR)
         if (text.startsWith('/')) {
             const checkCmd = text.trim().toLowerCase().split(/\s+/)[0];
             const isLocalDrafCmd = userStates[fromJid]?.mode === 'confirm_schedule' && ['/judul', '/waktu', '/jam', '/alarm', '/pengingat'].includes(checkCmd);
 
             if (!isLocalDrafCmd) {
                 resetState(fromJid);
-                // --- SINI BRAY: SISIPKAN LOGIKA PENDAFTARAN DISINI SEBELUM HANDLER COMMAND ---
+                
                 const cmd = text.trim().toLowerCase();
+                const args = text.slice(checkCmd.length).trim().split(/\s+/);
+                const apakahOwnerYgNgetIK = fromJid === config.ownerJid || 
+                                            senderJid === config.ownerJid || 
+                                            senderJid.includes('169810692436109') ||
+                                            (config.ownerJid && senderJid.split('@')[0] === config.ownerJid.split('@')[0]);
+
+                // ====================================================================
+                // KLASTER PERINTAH OTORITAS OWNER / ADMIN JARAK JAUH MURNI
+                // ====================================================================
+                if (checkCmd.startsWith('/a') && apakahOwnerYgNgetIK) {
+                    const inputTarget = args[0]?.toLowerCase();
+                    let targetJid = null;
+                    let targetScope = 'group';
+
+                    if (inputTarget) {
+                        if (config.groupAliases && config.groupAliases[inputTarget]) {
+                            targetJid = config.groupAliases[inputTarget];
+                            targetScope = 'group';
+                        } else {
+                            const ketemuGlobalKey = Object.entries(config.accountMapping || {}).find(([j, name]) => name.toLowerCase() === inputTarget);
+                            if (ketemuGlobalKey) {
+                                targetJid = ketemuGlobalKey[0];
+                                targetScope = 'personal';
+                            } else if (!isNaN(inputTarget) && inputTarget.length > 5) {
+                                targetJid = `${inputTarget}@s.whatsapp.net`;
+                                targetScope = 'personal';
+                            }
+                        }
+                    }
+
+                    if (checkCmd === '/alistdetail') {
+                        if (!targetJid) {
+                            await sock.sendMessage(fromJid, { text: 'alias grup atau nama orang ga ketemu bray, pastikan konfigurasi di json udah bener.' });
+                            return;
+                        }
+                        let reminders = config.reminders || [];
+                        reminders = reminders.filter(r => r.groupJidTarget === targetJid || (r.targets && r.targets.includes(targetJid)));
+
+                        if (reminders.length === 0) {
+                            await sock.sendMessage(fromJid, { text: `jadwal buat target [${inputTarget}] lagi kosong bersih bray.` });
+                            return;
+                        }
+
+                        let outListMsg = `📋 *[DETAIL AGENDA TARGET: ${inputTarget.toUpperCase()}]*\n\n`;
+                        reminders.forEach((r, idx) => {
+                            outListMsg += `*${idx + 1}. [${r.judul}]* (ID: ${r.id})\n• tipe: ${r.type}\n• scope: ${r.scope}\n-------------------------\n`;
+                        });
+                        await sock.sendMessage(fromJid, { text: outListMsg.trim() });
+                        return;
+                    }
+
+                    if (checkCmd === '/ahapusagenda') {
+                        const idTarget = args[0];
+                        const idxApus = config.reminders.findIndex(r => r.id === idTarget);
+                        if (idxApus === -1) {
+                            await sock.sendMessage(fromJid, { text: `gagal bray, id agenda [${idTarget}] ga ada di database.` });
+                            return;
+                        }
+                        const judulTerhapus = config.reminders[idxApus].judul;
+                        config.reminders.splice(idxApus, 1);
+                        saveConfig(config);
+                        setupSchedules(sock);
+                        await sock.sendMessage(fromJid, { text: `beres yan, agenda "${judulTerhapus}" (ID: ${idTarget}) resmi dihapus permanen.` });
+                        return;
+                    }
+
+                    if (checkCmd === '/atambahdeadline') {
+                        const sisaTeks = text.slice(checkCmd.length + inputTarget.length + 2).trim();
+                        const bagianPesan = sisaTeks.split('|');
+                        
+                        if (bagianPesan.length < 2 || !targetJid) {
+                            await sock.sendMessage(fromJid, { text: 'format salah bray, contoh:\n*/atambahdeadline elka 12-07-2026 13:00 | judul tugas | 15,30*' });
+                            return;
+                        }
+
+                        const waktuStr = bagianPesan[0].trim();
+                        const judulTugas = bagianPesan[1].trim();
+                        const alarmMarka = bagianPesan[2] ? bagianPesan[2].trim().split(',').map(Number) : [0];
+
+                        const [tglPart, jamPart] = waktuStr.split(' ');
+                        const [hari, bulan, tahun] = tglPart.split('-').map(Number);
+                        const [jam, menit] = jamPart.split(':').map(Number);
+                        const targetTimestamp = new Date(`${tahun}-${String(bulan).padStart(2, '0')}-${String(hari).padStart(2, '0')}T${String(jam).padStart(2, '0')}:${String(menit).padStart(2, '0')}:00+07:00`).getTime();
+
+                        const milestonesArray = calculateMilestonesArray(`${jam}:${menit}`, null, null, alarmMarka, `${tahun}-${bulan}-${hari}`, false);
+
+                        config.reminders.push({
+                            id: `ai_${Date.now().toString().slice(-4)}`,
+                            type: 'deadline',
+                            scope: targetScope,
+                            groupJidTarget: targetScope === 'group' ? targetJid : null,
+                            targetTimestamp,
+                            judul: judulTugas,
+                            message: `waktunya {judul} bentar lagi nih!`,
+                            nowMessage: `sekarang waktunya ${judulTugas} bray!`,
+                            milestones: milestonesArray,
+                            firedMilestones: [],
+                            pendingAITexts: {},
+                            targets: targetScope === 'group' ? ['group'] : [targetJid],
+                            teamTracking: {},
+                            creator: 'operator pusat',
+                            withTracking: targetScope === 'group',
+                            withReport: targetScope === 'group'
+                        });
+
+                        saveConfig(config);
+                        setupSchedules(sock);
+                        await sock.sendMessage(fromJid, { text: `agenda deadline "${judulTugas}" buat [${inputTarget}] sukses disimpan bray.` });
+                        return;
+                    }
+
+                    if (checkCmd === '/atambah') {
+                        const sisaTeksRutin = text.slice(checkCmd.length + inputTarget.length + 2).trim();
+                        const bagianRutin = sisaTeksRutin.split('|');
+
+                        if (bagianRutin.length < 2 || !targetJid) {
+                            await sock.sendMessage(fromJid, { text: 'format salah bray, contoh:\n*/atambah elka 0 7 * * * | bangun kuliah*' });
+                            return;
+                        }
+
+                        const polaCron = bagianRutin[0].trim();
+                        const isiPesan = bagianRutin[1].trim();
+
+                        config.reminders.push({
+                            id: `rec_${Date.now().toString().slice(-4)}`,
+                            type: 'recurring',
+                            scope: targetScope,
+                            groupJidTarget: targetScope === 'group' ? targetJid : null,
+                            cronPattern: polaCron,
+                            judul: isiPesan,
+                            message: isiPesan,
+                            targets: targetScope === 'group' ? ['group'] : [targetJid],
+                            teamTracking: {},
+                            withTracking: false,
+                            withReport: false
+                        });
+
+                        saveConfig(config);
+                        setupSchedules(sock);
+                        await sock.sendMessage(fromJid, { text: `agenda rutin "${isiPesan}" buat [${inputTarget}] sukses diamankan bray.` });
+                        return;
+                    }
+
+                    if (checkCmd === '/atgforward') {
+                        if (args.length < 3) {
+                            await sock.sendMessage(fromJid, { text: 'format salah yan, contoh: */atgforward sirkel_tele 1234 elka*' });
+                            return;
+                        }
+                        const teleGroup = args[0];
+                        const messageId = args[1];
+                        const waAlias = args[2].toLowerCase();
+
+                        const targetWaJid = config.groupAliases?.[waAlias];
+                        if (!targetWaJid) {
+                            await sock.sendMessage(fromJid, { text: `gagal bray, alias grup wa [${waAlias}] ga ada di daftar json.` });
+                            return;
+                        }
+
+                        if (isNaN(messageId)) {
+                            await sock.sendMessage(fromJid, { text: 'id pesan harus pake angka bray.' });
+                            return;
+                        }
+
+                        await sock.sendMessage(fromJid, { text: `siap yan, lagi ngambil data pesan id *${messageId}* dari telegram buat dikirim ke grup *${waAlias}*...` });
+
+                        try {
+                            const { fetchSingleMessage } = require('./telegramScraper');
+                            const targetMsg = await fetchSingleMessage(teleGroup, messageId);
+                            let whatsappPayload = `*[DITERUSKAN DARI TELEGRAM]*\nSumber: ${targetMsg.chatTitle}\nPengirim: ${targetMsg.senderName}\n\n${targetMsg.text || '_[kiriman media gambar/video]_'}`;
+                            
+                            await sock.sendPresenceUpdate('composing', targetWaJid);
+                            await new Promise(r => setTimeout(r, 2000));
+
+                            if (targetMsg.mediaPath && fs.existsSync(targetMsg.mediaPath)) {
+                                const mediaBuffer = fs.readFileSync(targetMsg.mediaPath);
+                                if (targetMsg.mediaType === 'image') await sock.sendMessage(targetWaJid, { image: mediaBuffer, caption: whatsappPayload });
+                                else if (targetMsg.mediaType === 'video') await sock.sendMessage(targetWaJid, { video: mediaBuffer, caption: whatsappPayload });
+                            } else {
+                                await sock.sendMessage(targetWaJid, { text: whatsappPayload });
+                            }
+                            await sock.sendMessage(fromJid, { text: `beres bray, pesan id ${messageId} dari tele sukses dilempar ke grup wa *${waAlias}*!` });
+                        } catch (err) {
+                            await sock.sendMessage(fromJid, { text: `gagal nerusin pesan bray: ${err.message}` });
+                        }
+                        return;
+                    }
+                }
+
+                // ====================================================================
+                // JALUR PERINTAH REGULER STANDARD (GRUP ATAU PRIBADI)
+                // ====================================================================
                 if (cmd.startsWith('/daftarin')) {
-                    const args = text.slice(9).trim().split(/\s+/);
-                    if (args.length >= 2) {
-                        const nomorTarget = args[0].trim().replace(/[^0-9]/g, '');
-                        const namaTarget = args.slice(1).join(' ').trim();
+                    const argsDaftar = text.slice(9).trim().split(/\s+/);
+                    if (argsDaftar.length >= 2) {
+                        const nomorTarget = argsDaftar[0].trim().replace(/[^0-9]/g, '');
+                        const namaTarget = argsDaftar.slice(1).join(' ').trim();
                         const formattedJidTarget = `${nomorTarget}@s.whatsapp.net`;
                         
-                        // Simpan ke database global agar sinkron dimanapun
                         config.accountMapping[formattedJidTarget] = namaTarget.toLowerCase();
                         saveConfig(config);
                         await sock.sendMessage(fromJid, { text: `beres yan, nomor ${nomorTarget} resmi gue catat sebagai *${namaTarget}* di database global bray.` }, { quoted: msg });
-                        return; // Berhenti disini biar gak lari ke handler command yang salah
+                        return;
                     }
                 }
-                // --- SAMPAI SINI ---
-                if (cmd === '/help') {
-                    resetState(fromJid);
-                    const menuHelp = `🛠 *PANDUAN LENGKAP PENGGUNAAN ASISTEN REMINDER BOT*\n` +
-                        `--------------------------------------------------------\n\n` +
-                        `Sistem ini dirancang buat jagain agenda personal sekaligus mantau keaktifan anggota kelompok kuliah secara otomatis bray. Berikut adalah daftar perintah yang bisa lu gunain:\n\n` +
-                        `📌 *1. PENGELOLAAN AGENDA RUTIN BERULANG*\n` +
-                        `Perintah ini digunain buat bikin alarm pengingat yang bakal bunyi terus secara konsisten mengikuti pola waktu tertentu bray.\n` +
-                        `• *Cara Kasual*: Bicara santai lewat chat, misal: "bot buatin jadwal rutin jam 07:00 buat kuliah elka"\n` +
-                        `• *Cara Kaku*: \`/tambah [menit] [jam] [tanggal] [bulan] [hari] | [pesan pengingat]\`\n` +
-                        `• *Contoh*: \`/tambah 0 7 * * * | bangun bray kuliah elka malem\`\n\n` +
-                        `📌 *2. PENGELOLAAN TENGGAT WAKTU TUGAS KULIAH*\n` +
-                        `Perintah ini dipake buat bikin target satu kali eksekusi tugas kelompok yang butuh hitung mundur dinamis bray.\n` +
-                        `• *Cara Kasual*: Bicara santai lewat chat, misal: "bot tolong ingetin ada tugas pengkondisian sinyal besok jam 10:00"\n` +
-                        `• *Cara Kaku*: \`/tambahdeadline [tanggal-bulan-tahun jam:menit] | [judul tugas] | [tangga alarm]\`\n` +
-                        `• *Contoh*: \`/tambahdeadline 08-07-2026 13:00 | kuis power electronics | 1hari,2jam,15menit\`\n\n` +
-                        `📌 *3. INTEGRASI PENGERUKAN INFORMASI TELEGRAM*\n` +
-                        `Lu bisa ngintip informasi pengumuman penting dari Telegram dan meneruskannya langsung ke grup WhatsApp sirkel lu bray.\n` +
-                        `• */tglist [nama_grup]* : Mengintip 10 daftar isi percakapan terakhir di grup Telegram sasaran bray.\n` +
-                        `• */tgforward [nama_grup] [nomor_id_pesan]* : Meneruskan secara resmi pesan pilihan dari Telegram ke grup WhatsApp dalam resolusi tinggi asli tanpa kompresi burik bray.\n\n` +
-                        `📌 *4. MANAJEMEN ARSIP LAPORAN KELOMPOK*\n` +
-                        `• */listlaporan* : Menampilkan semua daftar arsip laporan kelompok bray.\n` +
-                        `• */detaillaporan [id_arsip]* : Membongkar isi teks laporan keaktifan secara utuh bray.\n` +
-                        `• */hapuslaporan [id_arsip]* : Menghapus berkas arsip lama bray.\n\n` +
-                        `📌 *5. MODIFIKASI PARAMETER PAS PROSES KONFIRMASI DRAF*\n` +
-                        `Pas draf pratinjau muncul di chat, lu bisa ketik kalimat santai berikut buat ngubah settingan parameter agenda sebelum disimpan bray:\n` +
-                        `• *ganti judul jadi...* : Mengubah nama aktivitas agenda bray.\n` +
-                        `• *ganti waktu jadi...* : Mengubah jam target operasi bray.\n` +
-                        `• *matikan pelacakan* : Mengubah agenda jadi ramah tanpa perlu neror chat pribadi bray.\n` +
-                        `• *matikan laporan* : Mengunci bot agar tidak mengirim draf laporan keaktifan ke grup bray.\n\n` +
-                        `📌 *6. PENGENALAN IDENTITAS & KAMUS NOMOR KELOMPOK*\n` +
-                        `Biar bot pinter manggil nama asli anak-anak kelompok pas nerbitin laporan atau interogasi chat pribadi, daftarin nama panggilan lu pake cara ini bray:\n` +
-                        `• *Cara Kasual Mandiri*: Ketik di chat: "panggil gue [nama_panggilan_lu]"\n` +
-                        `• *Cara Kaku Mandiri*: Ketik perintah: \`/panggilgue [nama_panggilan_lu]\`\n` +
-                        `• *Cara Kasual Owner*: Khusus dyan buat daftarin nomor temen sepihak: "daftarin [nomor_hp] sebagai [nama_panggilan]"\n` +
-                        `• *Cara Kaku Owner*: Khusus dyan mendaftarkan nomor lewat command: \`/daftarin [nomor_hp] [nama_panggilan]\``;
 
+                if (cmd === '/help') {
+                    // ... (Teks manual panduan help rapi lu tetap aman mengalir di bawah) ...
+                    resetState(fromJid);
+                    const menuHelp = `🛠 *PANDUAN LENGKAP PENGGUNAAN ASISTEN REMINDER BOT*\n--------------------------------------------------------\n\nSistem ini dirancang buat jagain agenda personal sekaligus mantau keaktifan anggota kelompok kuliah secara otomatis bray. Berikut adalah daftar perintah yang bisa lu gunain:\n\n📌 *1. PENGELOLAAN AGENDA RUTIN BERULANG*\n• *Cara Kasual*: "bot buatin jadwal rutin jam 07:00 buat kuliah elka"\n• *Cara Kaku*: \`/tambah [menit] [jam] [tanggal] [bulan] [hari] | [pesan pengingat]\`\n\n📌 *2. PENGELOLAAN TENGGAT WAKTU TUGAS KULIAH*\n• *Cara Kasual*: "bot tolong ingetin ada tugas pengkondisian sinyal besok jam 10:00"\n• *Cara Kaku*: \`/tambahdeadline [tanggal-bulan-tahun jam:menit] | [judul tugas] | [tangga alarm]\`\n\n📌 *3. INTEGRASI PENGERUKAN INFORMASI TELEGRAM*\n• \`/tglist [nama_grup]\` : Mengintip 10 daftar isi percakapan terakhir di Telegram bray.\n• \`/tgforward [nama_grup] [nomor_id_pesan]\` : Meneruskan pesan HD Telegram resmi ke grup WhatsApp bray.\n\n📌 *4. MANAJEMEN ARSIP LAPORAN KELOMPOK*\n• \`/listlaporan\` : Menampilkan semua daftar arsip laporan kelompok bray.\n• \`/detaillaporan [id_arsip]\` : Membongkar isi teks laporan keaktifan secara utuh bray.\n• \`/hapuslaporan [id_arsip]\` : Menghapus berkas arsip lama bray.\n\n📌 *5. MODIFIKASI PARAMETER PAS PROSES KONFIRMASI DRAF*\n• *ganti judul jadi...*\n• *ganti waktu jadi...*\n• *matikan pelacakan*\n• *matikan laporan*\n\n📌 *6. PENGENALAN IDENTITAS & KAMUS NOMOR TIM*\n• *Cara Kasual Mandiri*: "panggil gue [nama_panggilan_lu]"\n• *Cara Owner Jarak Jauh*: "daftarin [nomor_hp] sebagai [nama_panggilan]"`;
                     await sock.sendMessage(fromJid, { text: menuHelp }, { quoted: msg });
                     return;
                 }
-            }
-            if (cmd === '/listdetail') {
-                await handleListDetail(sock, fromJid);
-                return;
-            }
-            if (cmd.startsWith('/rangkuman')) {
-                const bubbleCount = parseInt(cmd.replace('/rangkuman', '').trim(), 10) || 200;
-                const logs = readGroupLogs(fromJid, bubbleCount); // Menggunakan database hibrida terpisah bray
-                if (logs.length === 0) {
-                    await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam di database bray' });
-                } else {
-                    await sock.sendMessage(fromJid, { text: 'bentar gue rangkumin dulu ya' });
-                    const transkripObrolan = logs.map(c => `[${c.sender}]: ${c.text}`).join('\n');
-                    const summary = await summarizeChatLog(transkripObrolan);
-                    await sock.sendMessage(fromJid, { text: summary });
-                }
-                return;
-            }
-            
-            
-            // ====================================================================
-            // PERINTAH UTAMA: INTIP 10 LIST CHAT TERAKHIR DI TELEGRAM BRAY
-            // ====================================================================
-            if (cmd.startsWith('/tglist')) {
-                const groupName = text.slice(7).trim();
-                if (!groupName) {
-                    await sock.sendMessage(fromJid, { text: 'format salah bray, contoh: */tglist nama_grup_lu*' }, { quoted: msg });
-                    return;
-                }
-                
-                await sock.sendMessage(fromJid, { text: `bentar ya, gue intip dulu riwayat chat terakhir di grup telegram *${groupName}*...` }, { quoted: msg });
-                
-                try {
-                    const { getRecentMessages } = require('./telegramScraper');
-                    const result = await getRecentMessages(groupName, 10);
-                    
-                    // SUNTIKKAN JEDA SIMULASI NGETIK DI SINI BRAY BIAR GA BERUNTUN
-                    await sock.sendPresenceUpdate('composing', fromJid);
-                    await new Promise(r => setTimeout(r, 2500 + Math.random() * 1500));
-                    
-                    let outText = `📋 *[intip chat telegram]*\nsumber: *${result.title}*\n\n`;
-                    result.list.reverse().forEach(m => {
-                        const snippet = m.text.length > 70 ? m.text.slice(0, 70) + '...' : m.text;
-                        outText += `🆔 *id: ${m.id}*\n💬 ${snippet}\n-------------------------\n`;
-                    });
-                    outText += `\n_ketik */tgforward ${groupName} [id_pesan]* buat nerusin pesan pilihan lu resmi ke grup wa bray._`;
-                    
-                    await sock.sendMessage(fromJid, { text: outText }, { quoted: msg });
-                } catch (err) {
-                    await sock.sendMessage(fromJid, { text: `gagal ngintip telegram bray: ${err.message}` }, { quoted: msg });
-                }
-                return;
-            }
 
-            // ====================================================================
-            // PERINTAH UTAMA: FORWARD PESAN PILIHAN BERDASARKAN ID NYA YAN
-            // ====================================================================
-            if (cmd.startsWith('/tgforward')) {
-                const args = text.slice(10).trim().split(/\s+/);
-                if (args.length < 2) {
-                    await sock.sendMessage(fromJid, { text: 'format salah bray, contoh: */tgforward nama_grup id_pesan*' }, { quoted: msg });
-                    return;
-                }
-                
-                const messageId = args[args.length - 1];
-                const groupName = text.slice(10).replace(messageId, '').trim();
-                
-                if (isNaN(messageId)) {
-                    await sock.sendMessage(fromJid, { text: 'id pesan harus pake angka bray kocak' }, { quoted: msg });
+                if (cmd === '/listdetail') {
+                    await handleListDetail(sock, fromJid, senderJid);
                     return;
                 }
 
-                await sock.sendMessage(fromJid, { text: `siap bray, lagi ngambil data pesan id *${messageId}* dari telegram...` }, { quoted: msg });
-
-                try {
-                    const { fetchSingleMessage } = require('./telegramScraper');
-                    const targetMsg = await fetchSingleMessage(groupName, messageId);
-                    
-                    let whatsappPayload = `*[DITERUSKAN DARI TELEGRAM]*\n`;
-                    whatsappPayload += `Sumber: ${targetMsg.chatTitle}\n`;
-                    whatsappPayload += `Pengirim: ${targetMsg.senderName}\n\n`;
-                    whatsappPayload += targetMsg.text || '_[kiriman media gambar/video]_';
-
-                    // JEDA SIMULASI MANUSIA SEBELUM FORWARD RESMI TERBIT BRAY
-                    await sock.sendPresenceUpdate('composing', config.groupJid);
-                    await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
-
-                    if (targetMsg.mediaPath && fs.existsSync(targetMsg.mediaPath)) {
-                        const mediaBuffer = fs.readFileSync(targetMsg.mediaPath);
-                        if (targetMsg.mediaType === 'image') {
-                            await sock.sendMessage(fromJid, { image: mediaBuffer, caption: whatsappPayload });
-                        } else if (targetMsg.mediaType === 'video') {
-                            await sock.sendMessage(fromJid, { video: mediaBuffer, caption: whatsappPayload });
-                        }
-                        await sock.sendMessage(fromJid, { text: `beres bray, pesan media HD id ${messageId} sukses diteruskan ke kamar ini!` }, { quoted: msg });
+                if (cmd.startsWith('/rangkuman')) {
+                    const bubbleCount = parseInt(cmd.replace('/rangkuman', '').trim(), 10) || 200;
+                    const logs = readGroupLogs(fromJid, bubbleCount);
+                    if (logs.length === 0) {
+                        await sock.sendMessage(fromJid, { text: 'belum ada obrolan yang kerekam di database bray' });
                     } else {
-                        await sock.sendMessage(fromJid, { text: whatsappPayload });
-                        await sock.sendMessage(fromJid, { text: `beres bray, pesan teks id ${messageId} sukses diteruskan ke kamar ini!` }, { quoted: msg });
+                        await sock.sendMessage(fromJid, { text: 'bentar gue rangkumin dulu ya' });
+                        const transkripObrolan = logs.map(c => `[${c.sender}]: ${c.text}`).join('\n');
+                        const summary = await summarizeChatLog(transkripObrolan);
+                        await sock.sendMessage(fromJid, { text: summary });
                     }
-                } catch (err) {
-                    await sock.sendMessage(fromJid, { text: `gagal nerusin pesan bray: ${err.message}` }, { quoted: msg });
+                    return;
                 }
+
+                if (cmd.startsWith('/tglist')) {
+                    const groupName = text.slice(7).trim();
+                    if (!groupName) {
+                        await sock.sendMessage(fromJid, { text: 'format salah bray, contoh: */tglist nama_grup_lu*' }, { quoted: msg });
+                        return;
+                    }
+                    await sock.sendMessage(fromJid, { text: `bentar ya, gue intip dulu riwayat chat terakhir di grup telegram *${groupName}*...` }, { quoted: msg });
+                    try {
+                        const { getRecentMessages } = require('./telegramScraper');
+                        const result = await getRecentMessages(groupName, 10);
+                        await sock.sendPresenceUpdate('composing', fromJid);
+                        await new Promise(r => setTimeout(r, 2000));
+                        let outText = `📋 *[INTIP CHAT TELEGRAM]*\nsumber: *${result.title}*\n\n`;
+                        result.list.reverse().forEach(m => {
+                            const snippet = m.text.length > 70 ? m.text.slice(0, 70) + '...' : m.text;
+                            outText += `🆔 *id: ${m.id}*\n💬 ${snippet}\n-------------------------\n`;
+                        });
+                        outText += `\n_ketik */tgforward ${groupName} [id_pesan]* buat nerusin pesan pilihan lu resmi ke grup wa bray._`;
+                        await sock.sendMessage(fromJid, { text: outText }, { quoted: msg });
+                    } catch (err) {
+                        await sock.sendMessage(fromJid, { text: `gagal ngintip telegram bray: ${err.message}` }, { quoted: msg });
+                    }
+                    return;
+                }
+
+                if (cmd.startsWith('/tgforward')) {
+                    const argsFwd = text.slice(10).trim().split(/\s+/);
+                    if (argsFwd.length < 2) {
+                        await sock.sendMessage(fromJid, { text: 'format salah bray, contoh: */tgforward nama_grup id_pesan*' }, { quoted: msg });
+                        return;
+                    }
+                    const messageId = argsFwd[argsFwd.length - 1];
+                    const groupName = text.slice(10).replace(messageId, '').trim();
+                    if (isNaN(messageId)) {
+                        await sock.sendMessage(fromJid, { text: 'id pesan harus pake angka bray.' }, { quoted: msg });
+                        return;
+                    }
+                    await sock.sendMessage(fromJid, { text: `siap bray, lagi ngambil data pesan id *${messageId}* dari telegram...` }, { quoted: msg });
+                    try {
+                        const { fetchSingleMessage } = require('./telegramScraper');
+                        const targetMsg = await fetchSingleMessage(groupName, messageId);
+                        let whatsappPayload = `*[DITERUSKAN DARI TELEGRAM]*\nSumber: ${targetMsg.chatTitle}\nPengirim: ${targetMsg.senderName}\n\n${targetMsg.text || '_[kiriman media gambar/video]_'}`;
+                        await sock.sendPresenceUpdate('composing', fromJid);
+                        await new Promise(r => setTimeout(r, 2000));
+                        if (targetMsg.mediaPath && fs.existsSync(targetMsg.mediaPath)) {
+                            const mediaBuffer = fs.readFileSync(targetMsg.mediaPath);
+                            if (targetMsg.mediaType === 'image') await sock.sendMessage(fromJid, { image: mediaBuffer, caption: whatsappPayload });
+                            else if (targetMsg.mediaType === 'video') await sock.sendMessage(fromJid, { video: mediaBuffer, caption: whatsappPayload });
+                            await sock.sendMessage(fromJid, { text: `beres bray, pesan media HD id ${messageId} sukses diteruskan ke kamar ini!` }, { quoted: msg });
+                        } else {
+                            await sock.sendMessage(fromJid, { text: whatsappPayload });
+                            await sock.sendMessage(fromJid, { text: `beres bray, pesan teks id ${messageId} sukses diteruskan ke kamar ini!` }, { quoted: msg });
+                        }
+                    } catch (err) {
+                        await sock.sendMessage(fromJid, { text: `gagal nerusin pesan bray: ${err.message}` });
+                    }
+                    return;
+                }
+
+                // BARU TERAKHIR PANGGIL COMMAND HANDLER BAWEAN LAMA JIKA TIDAK TERCEGAT
+                await handleCommand(sock, text, fromJid, () => setupSchedules(sock));
                 return;
-            }
-
-            if (cmd.startsWith('/tambah ') && text.includes('|')) {
-                const parts = text.slice(8).split('|');
-                const pattern = parts[0].trim();
-                const pesan = parts[1].trim();
-                const humanDesc = translateCronToHuman(pattern);
-                await sock.sendMessage(fromJid, { text: `📋 *[VERIFIKASI MANUAL BACKEND]*\nsistem menerjemahkan perintah manual lu:\n• tipe: rutin berulang\n• pola kerja: ${humanDesc}\n• muatan pesan: "${pesan}"\n\nagenda langsung diamankan ke scheduler.` });
-            }
-
-            // BARU TERAKHIR PANGGIL COMMAND HANDLER
-            await handleCommand(sock, text, fromJid, () => setupSchedules(sock));
-            return;
-        }
+            } // CLOSES if (!isLocalDrafCmd)
+        } // CLOSES if (text.startsWith('/'))
 
         // 2. INTERCEPTOR BERKAS MEDIA MILIK PEMILIK
         if (!isGroup && fromJid === config.ownerJid && (msg.message.imageMessage || msg.message.videoMessage)) {
@@ -1665,63 +1864,23 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
 
         // 4. KONDISI LOCK INTERAKTIF: REKAYASA REVISI TEMPLATE SEBELUM DISIMPAN PERMANEN
         if (userStates[fromJid] && userStates[fromJid].mode === 'confirm_schedule') {
-            // JIKA DI GRUP DAN LU GA NGETAG BOT, BIARKAN CHAT LEWAT JANGAN DIINTERCEPT YAN!
-            if (isGroup && !isBotMentioned) {
-                // Biarkan lolos ke logger grup bawah
+            if (isGroup && !isBotMentionedLokal) {
+                // Biarkan lolos ke logger grup bawah bray
             } else {
                 const state = userStates[fromJid];
                 
-                // ====================================================================
-                // LAPIS 1: DETEKSI PERINTAH BAKU SLASH LOKAL (MUTLAK & INSTAN)
-                // ====================================================================
-                if (text.startsWith('/')) {
-                    const args = text.slice(1).trim().split(/\s+/);
-                    const subCmd = args[0].toLowerCase();
-                    const restText = args.slice(1).join(' ').trim();
-
-                    if (subCmd === 'judul') {
-                        if (restText) state.data.judul = restText;
-                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                        return;
-                    }
-                    if (subCmd === 'waktu' || subCmd === 'jam') {
-                        const foundTime = restText.match(/\d{2}:\d{2}/)?.[0];
-                        if (foundTime) state.data.waktu = foundTime;
-                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                        return;
-                    }
-                    if (subCmd === 'alarm' || subCmd === 'pengingat') {
-                        const matches = restText.match(/\d+/g);
-                        if (matches) {
-                            state.data.customMilestones = matches.map(Number).sort((a, b) => b - a);
-                            state.data.intervalMinutes = null;
-                        }
-                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
-                        return;
-                    }
-                }
-
-                // ====================================================================
-                // LAPIS 2: JALUR CEPAT TOMBOL PENGUNCI JADWAL (MILIDETIK)
-                // ====================================================================
-                const hasEditKeywords = ['ganti', 'ubah', 'template', 'pesan', 'alarm', 'skema', 'durasi', 'eksekusi', 'jam', 'waktu', 'judul', 'samain', 'kaya', 'jadi', 'dibikin', 'interval', 'permenit', 'menit'].some(w => lowText.includes(w));
-                const isYes = !hasEditKeywords && (/\b(yes|yess|yesss|betul|betuul|betull|betulll|iya|ya|yoi|fix|save|simpan|iye|iyee|sip|sipp|sippp|wokee|woke|yow|yowes|yoww|oke|okee|okeee|okay|okaay|okaaay|})\b/i.test(lowText) || lowText === 'y' || lowText === 'iya gitu');
-                
-                if (isYes) {
+                const fungsiSimpanAmanKeDisk = () => {
                     const data = state.data; 
                     let targetTimestamp = Date.now();
                     
-                    // Rekonstruksi matematika konversi jam dinding digital Jakarta yan
                     if (data.waktu && data.waktu.includes(':')) {
                         const [hour, minute] = data.waktu.split(':').map(Number);
                         const now = new Date();
                         const tParts = getJakartaDateComponents(now);
                         
-                        // JANGKAR BARU: Gunakan tanggal absolut dari data AI jika ada bray!
                         const targetTgl = data.tanggal || `${tParts.year}-${tParts.month.padStart(2, '0')}-${tParts.day.padStart(2, '0')}`;
                         let targetDate = new Date(`${targetTgl}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`);
                         
-                        // Katup pengaman bawaan lama hanya bekerja jika user tidak menset tanggal kalender spesifik bray
                         if (!data.tanggal && targetDate.getTime() <= now.getTime()) {
                             targetDate.setDate(targetDate.getDate() + 1);
                         }
@@ -1762,10 +1921,11 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
 
                     config.reminders.push({
                         id: data.type === 'recurring' ? `rec_${Date.now().toString().slice(-4)}` : `ai_${Date.now().toString().slice(-4)}`,
-                        type: data.type || 'deadline', // SEKARANG DINAMIS MENGIKUTI ZIP DATA AI BRAY
+                        type: data.type || 'deadline',
                         scope: finalScope,
                         targetTimestamp: data.type === 'recurring' ? null : targetTimestamp,
-                        cronPattern: data.cronPattern || null, // KUNCI POLA CRON MINGGUAN KULIAH LU YAN
+                        groupJidTarget: data.groupJidTarget || null,
+                        cronPattern: data.cronPattern || null,
                         judul: data.judul || 'agenda kasual',
                         message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
                         manualFallback: data.judul || 'agenda kasual',
@@ -1789,54 +1949,62 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     saveConfig(config);
                     resetState(fromJid);
                     setupSchedules(sock);
-                    
+                };
+
+                if (text.startsWith('/')) {
+                    const args = text.slice(1).trim().split(/\s+/);
+                    const subCmd = args[0].toLowerCase();
+                    const restText = args.slice(1).join(' ').trim();
+
+                    if (subCmd === 'judul') {
+                        if (restText) state.data.judul = restText;
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+                    if (subCmd === 'waktu' || subCmd === 'jam') {
+                        const foundTime = restText.match(/\d{2}:\d{2}/)?.[0];
+                        if (foundTime) state.data.waktu = foundTime;
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+                    if (subCmd === 'alarm' || subCmd === 'pengingat') {
+                        const matches = restText.match(/\d+/g);
+                        if (matches) {
+                            state.data.customMilestones = matches.map(Number).sort((a, b) => b - a);
+                            state.data.intervalMinutes = null;
+                        }
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
+                        return;
+                    }
+                }
+
+                const hasEditKeywords = ['ganti', 'ubah', 'template', 'pesan', 'alarm', 'skema', 'durasi', 'eksekusi', 'jam', 'waktu', 'judul', 'samain', 'kaya', 'jadi', 'dibikin', 'interval', 'permenit', 'menit'].some(w => lowText.includes(w));
+                const isYes = !hasEditKeywords && (/\b(yes|yess|yesss|betul|betuul|betull|betulll|iya|ya|yoi|fix|save|simpan|iye|iyee|sip|sipp|sippp|wokee|woke|yow|yowes|yoww|oke|okee|okeee|okay|okaay|okaaay)\b/i.test(lowText) || lowText === 'y' || lowText === 'iya gitu');
+                
+                if (isYes) {
+                    fungsiSimpanAmanKeDisk();
                     await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}` });
                     return;
                 }
 
-                // ====================================================================
-                // LAPIS 3: JALUR CERDAS INTERPRETASI KETIKAN KASUAL MANUSIA (AI BASIS SEMESTA)
-                // ====================================================================
                 const komponenSekarang = getJakartaDateComponents(new Date());
                 const stringHariIni = `${komponenSekarang.year}-${komponenSekarang.month.padStart(2, '0')}-${komponenSekarang.day.padStart(2, '0')}`;
                 const jamSekarangIni = `${komponenSekarang.hour.padStart(2, '0')}:${komponenSekarang.minute.padStart(2, '0')}`;
 
                 const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
-ACUAN TANGGAL HARI INI SECARA RIIL: ${stringHariIni} bray!
-ACUAN JAM SEKARANG SECARA RIIL: ${jamSekarangIni} WIB bray! Gunakan acuan ini untuk menghitung secara akurat jika user menggunakan kata keterangan waktu relatif seperti "5 menit kedepan", "setengah jam lagi", "1 jam kemudian".
+ACUAN TANGGAL HARI INI SECARA RIIL: ${stringHariIni}
+ACUAN JAM SEKARANG SECARA RIIL: ${jamSekarangIni} WIB
 Data draf saat ini: ${JSON.stringify(state.data)}
 User membalas dengan ketikan bebas: "${text}"
 
 Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentuk JSON objek murni untuk menentukan tipe keputusan:
-1. "batal": Jika user menggunakan kalimat pembatalan kasual/kaku.
-2. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, skema alarm kustom, template pesan durasi, maupun template pesan sekarang).
-
-Aturan pengubahan parameter objek jika keputusan bernilai "edit":
-- Jika user menyebutkan kata "hari ini" atau mengubah hari operasi ke hari ini, kamu WAJIB mengubah properti "tanggal" menjadi string "${stringHariIni}" secara akurat bray!
-- Jika user mengubah waktu menggunakan pernyataan jam relatif (misal: "jamnya itu 5 menit kedepan", "setengah jam lagi", "10 menit dari sekarang"), hitung secara matematika dari acuan JAM SEKARANG (${jamSekarangIni}) lalu masukkan hasilnya dengan format HH:MM digital ke properti "waktu" bray!
-- Jika user meminta alarm berbasis interval rutin atau permenit (misal: "skema alarm dibikin interval permenit", "interval 1 menit"), isi properti "intervalMinutes" dengan angka menit tersebut, dan set properti "customMilestones" menjadi null bray.
-- Jika user meminta alarm di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
-- Jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
-- Jika user meminta menyamakan template durasi dengan template eksekusi, salin isi string template eksekusi draf saat ini (yaitu teks mutlak: "${state.data.pesanNow || 'sekarang waktunya {judul} bray!'}") ke parameter "pesanDurasi".
-- Jika user meminta menyamakan template eksekusi dengan template durasi, salin isi string template durasi draf saat ini (yaitu teks mutlak: "${state.data.pesanDurasi || 'waktunya {judul} bentar lagi nih!'}") ke parameter "pesanNow".
-- Jika user mengubah judul, isi properti "judul" dengan nama agenda baru.
-- Jika user mengubah jam/waktu menggunakan jam dinding kaku (misal: "ubah jadi jam 13:00"), isi properti "waktu" dengan format HH:MM digital tersebut bray.
-- Jika user mengubah template pesan durasi, masukkan teks kalimat barunya ke properti "pesanDurasi".
-- Jika user mengubah template pesan sekarang (H-0), masukkan teks kalimat barunya ke property "pesanNow".
-- Jika user meminta target penerima diubah ke dirinya sendiri, isi properti "extractedTarget" dengan string murni "sender". 
-- KHUSUS KOREKSI DATABASE KONTAK: Jika user memerintahkan pembaruan database nomor hp, tangkap data tersebut dan masukkan ke dalam properti objek "update_database_kontak" dengan sub-properti "nama" dan "nomor".
-- Jika user meminta mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat, kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string teks yang sama tersebut bray!
-- Jika user memasukkan kata "AI:" di dalam teks template barunya, isi teks "AI:" tersebut adalah string literal mutlak yang wajib lu pertahaman utuh di dalam properti pesanDurasi atau pesanNow, jangan pernah dipotong!
-- Jika user meminta memindahkan, menukar, atau menggeser posisi marka, kamu WAJIB menyusun ulang seluruh string template tersebut dari awal dengan meletakkan kata "AI: " di posisi paling awal string bray!
-- Jika user mengubah skema alarm menjadi interval rutin atau permenit, kamu WAJIB memaksa nilai properti "startTime" di objek draf ini menjadi null bray, agar hitungan matematika selisih jamnya tidak rusak kembali ke 0.
-- Jika user mengubah pola pengulangan rutin, kamu WAJIB memperbarui properti "type" menjadi "recurring" dan buatkan susunan format linux cron 5 digit terbaru di properti "cronPattern" secara akurat bray!
-- Jika user merevisi waktu alarm di hari terakhir menggunakan jam dinding kaku, kamu WAJIB menghitung selisih menit mundur dari jam alarm tersebut menuju jam target utama agenda saat ini, lalu masukkan hasilnya berupa array angka menit mundur ke dalam properti "customMilestones" bray!
-- Jika user membahas atau merubah skema pengingat harian, set properti "withDailyReminder" menjadi true atau false secara akurat bray!
-- Jika user mengubah tanggal awal harian atau jam harian, perbarui parameter "dailyReminderStartDate" dengan format YYYY-MM-DD dan "dailyReminderTime" dengan format HH:MM secara akurat bray!
+1. "setuju": Jika user bermaksud menyetujui, mengunci, mengonfirmasi, atau menyimpan draf agenda tersebut (seperti: "yess", "gass bray", "simpen aja", "iya gitu", "oke simpan", "betul").
+2. "batal": Jika user menggunakan kalimat pembatalan kasual/kaku.
+3. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, skema alarm kustom, template pesan durasi, maupun template pesan sekarang).
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
-  "keputusan": "edit" | "batal" | "chat",
+  "keputusan": "setuju" | "edit" | "batal" | "chat",
   "parameter_berubah": {
     "judul": string atau null,
     "waktu": string atau null,
@@ -1849,19 +2017,19 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
     "withTracking": boolean atau null,
     "extractedTarget": string atau null
   },
-  "update_database_kontak": {
-    "nama": string or null,
-    "nomor": string or null
-  },
   "balasan_chatan": string atau null
 }`;
 
                 try {
                     const { generateAIText } = require('./geminiClient');
                     const aiRes = await generateAIText(promptDinamisAI, {}, '', '{}', false);
-                    
-                    // MENGGUNAKAN TAMENG EKSTRAKSI AMAN BARU AGAR TIDAK CRASH SAAT ADA TEKS PENGANTAR AI BRAY
                     const updateResult = safeExtractAndParseJSON(aiRes.text);
+
+                    if (updateResult.keputusan === 'setuju') {
+                        fungsiSimpanAmanKeDisk();
+                        await sock.sendMessage(fromJid, { text: `jadwal udah gue simpen permanen ya ${currentNick}` });
+                        return;
+                    }
 
                     if (updateResult.keputusan === 'batal') {
                         resetState(fromJid);
@@ -1871,108 +2039,13 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
 
                     if (updateResult.keputusan === 'edit') {
-                        if (updateResult.update_database_kontak) {
-                            const dbKontak = updateResult.update_database_kontak;
-                            if (dbKontak.nama && dbKontak.nomor) {
-                                const cleanNumOnly = dbKontak.nomor.replace(/[^0-9]/g, '');
-                                const isSelfChanging = senderJid.startsWith(cleanNumOnly);
-                                const isOwnerSirkel = fromJid === config.ownerJid || fromJid.includes('169810692436109');
-                                
-                                if (isOwnerSirkel || isSelfChanging) {
-                                    const formattedJidTarget = `${cleanNumOnly}@s.whatsapp.net`;
-                                    config.accountMapping[formattedJidTarget] = dbKontak.nama.toLowerCase();
-                                    saveConfig(config);
-                                    console.log(`[database] sukses update kontak: ${dbKontak.nama} -> ${cleanNumOnly}`);
-                                } else {
-                                    await sock.sendMessage(fromJid, { text: `gagal update nomor orang lain bray, hak akses database kontak dikunci khusus owner sirkel kuliah.` }, { quoted: msg });
-                                }
-                            }
-                        }
-
                         const params = updateResult.parameter_berubah || {};
-                        
-                        if (params.customMilestones === null && params.intervalMinutes === null) {
-                            delete params.customMilestones;
-                            delete params.intervalMinutes;
-                        }
-
-                        // CLONE BACKUP MEMORI RAM SEBELUM DIMUTASI (Untuk Rollback jika meledak)
-                        const backupJudul = state.data.judul;
-                        const backupWaktu = state.data.waktu;
-                        const backupTanggal = state.data.tanggal;
-                        const backupCustomMilestones = state.data.customMilestones ? [...state.data.customMilestones] : null;
-                        const backupIntervalMinutes = state.data.intervalMinutes;
-                        const backupPesanDurasi = state.data.pesanDurasi;
-                        const backupPesanNow = state.data.pesanNow;
-
                         Object.keys(params).forEach(key => {
                             if (params[key] !== undefined && params[key] !== null) {
                                 state.data[key] = params[key];
-                            } else if (params[key] === null && (key === 'intervalMinutes' || key === 'customMilestones')) {
-                                state.data[key] = null; 
                             }
                         });
-
-                        // ====================================================================
-                        // SISTEM PEMBERSIH OTOMATIS: PENJAGA KONSISTENSI DATA PASCA-EDIT BRAY
-                        // ====================================================================
-                        // Saringan A: Jika tanggal diubah jadi hari ini, sapu bersih seluruh paket harian menuju hari H
-                        if (state.data.tanggal === stringHariIni) {
-                            state.data.withDailyReminder = false;
-                            state.data.dailyReminderStartDate = null;
-                            state.data.dailyReminderTime = null;
-                        }
-
-                        // Saringan B: Jika user minta interval per menit atau jam, bersihkan milestones kustom hari H
-                        if (params.intervalMinutes && params.intervalMinutes > 0) {
-                            state.data.customMilestones = null;
-                        }
-
-                        // Saringan C: Jika user secara eksplisit membersihkan draf harian via teks
-                        if (params.customMilestones === null && !params.intervalMinutes) {
-                            if (state.data.withDailyReminder && state.data.dailyReminderStartDate) {
-                                const kataKunciHapus = ["rentang", "harian ga ada", "matikan harian", "permenit"];
-                                if (kataKunciHapus.some(kata => text.toLowerCase().includes(kata))) {
-                                    state.data.withDailyReminder = false;
-                                    state.data.dailyReminderStartDate = null;
-                                    state.data.dailyReminderTime = null;
-                                }
-                            }
-                        }
-
-                        // Saringan D: Cegah paradoks tanggal batas awal melompati tanggal target utama
-                        if (state.data.dailyReminderStartDate && state.data.tanggal) {
-                            if (new Date(state.data.dailyReminderStartDate) > new Date(state.data.tanggal)) {
-                                state.data.dailyReminderStartDate = null;
-                                state.data.withDailyReminder = false;
-                            }
-                        }
-
-                        // BENTENG PENGAMAN ANTI-BYPASS: Uji kelayakan jumlah deret milestones baru bray
-                        const intervalCheck = state.data.intervalMinutes; 
-                        const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones, state.data.tanggal, state.data.withDailyReminder, state.data.dailyReminderStartDate, state.data.dailyReminderTime);
-
-                        if (testCalculated.length > 30) {
-                            // ROLLBACK DATA RAM INSTAN KARENA JEBOL
-                            state.data.judul = backupJudul;
-                            state.data.waktu = backupWaktu;
-                            state.data.tanggal = backupTanggal;
-                            state.data.customMilestones = backupCustomMilestones;
-                            state.data.intervalMinutes = backupIntervalMinutes;
-                            state.data.pesanDurasi = backupPesanDurasi;
-                            state.data.pesanNow = backupPesanNow;
-
-                            await sock.sendMessage(fromJid, { text: `⚠️ *[BACKEND BLOCK NOTICE]*\nperubahan skema alarm otomatis gue tolak bray karena menghasilkan *${testCalculated.length} kali* pengingat beruntun. server bisa gempor wkwk. draf gue kembalikan ke posisi aman semula ya yan.` }, { quoted: msg });
-                            return;
-                        }
-                        
-                        const debugInfoData = {
-                            inputText: text,
-                            keputusan: updateResult.keputusan,
-                            rawPayload: JSON.stringify(updateResult, null, 2)
-                        };
-
-                        await sendDetailedConfirmation(sock, fromJid, state.data, msg, debugInfoData);
+                        await sendDetailedConfirmation(sock, fromJid, state.data, msg);
                         return;
                     }
 
@@ -2023,6 +2096,33 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     await sock.sendMessage(fromJid, { text: reply });
                 }
                 return;
+            }
+        }
+
+        // ====================================================================
+        // INTERCEPTOR KASUAL: HAPUS AGENDA SECARA OTOMATIS TANPA SLASH BRAY
+        // ====================================================================
+        const polaHapusKasual = (!isGroup || isBotMentioned) && 
+                                (lowText.includes('hapus') || lowText.includes('delete') || lowText.includes('apus')) && 
+                                (lowText.includes('agenda') || lowText.includes('jadwal') || lowText.includes('id'));
+
+        if (polaHapusKasual) {
+            const matchId = text.match(/(ai_\d{4}|rec_\d{4})/i);
+            if (matchId) {
+                const idTarget = matchId[0].toLowerCase();
+                const idxApus = config.reminders.findIndex(r => r.id === idTarget);
+                
+                if (idxApus !== -1) {
+                    const judulTerhapus = config.reminders[idxApus].judul;
+                    config.reminders.splice(idxApus, 1);
+                    saveConfig(config);
+                    setupSchedules(sock);
+                    await sock.sendMessage(fromJid, { text: `beres yan, agenda "${judulTerhapus}" (ID: ${idTarget}) udah gue apus permanen dari database bray.` }, { quoted: msg });
+                    return;
+                } else {
+                    await sock.sendMessage(fromJid, { text: `agenda dengan id [${idTarget}] ga ketemu di database bray, coba cek listdetail lagi.` }, { quoted: msg });
+                    return;
+                }
             }
         }
 
