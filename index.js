@@ -1128,11 +1128,16 @@ async function startBot() {
         }
 
         // ====================================================================
-        // SIRKUIT PEMBEKUAN OTAK BOT OTOMATIS (VERSI PEKA SENSOR TAG GRUP)
+        // SIRKUIT PEMBEKUAN OTAK BOT OTOMATIS (VERSI PEKA SENSOR TAG GRUP & LID)
         // ====================================================================
         const apakahMintaAktif = lowText.includes('/botaktif');
         const automakerMintaPasif = lowText.includes('/botpasif');
-        const apakahOwnerYgNgetIK = fromJid === config.ownerJid || senderJid === config.ownerJid;
+        
+        // TAMENG HIBRIDA: Cek kesamaan string kaku, nomor murni, atau ID LID unik milik lu yan bray
+        const apakahOwnerYgNgetIK = fromJid === config.ownerJid || 
+                                    senderJid === config.ownerJid || 
+                                    senderJid.includes('169810692436109') ||
+                                    (config.ownerJid && senderJid.split('@')[0] === config.ownerJid.split('@')[0]);
 
         if (isGroup && !isBotActiveInGroup) {
             if (apakahMintaAktif && apakahOwnerYgNgetIK) {
@@ -1142,12 +1147,11 @@ async function startBot() {
                 return;
             }
             
-            // TAMENG AMAN: Kita hitung langsung deteksi mention lokal di sini biar ga memicu ReferenceError bray
             const apakahBotDimentionLokal = text && (lowText.includes('bot') || (botJidNumber && lowText.includes(botJidNumber)) || msg.mentionedJid?.includes(botJidNumber));
             if (apakahBotDimentionLokal) {
                 console.log(`⚠️ [PEMBERITAHUAN] Pesan dari grup ini diabaikan peladen karena statusnya masih beku bray.`);
             }
-            return; // Katup pengunci total agar bot tidak merespon chat lain sebelum aktif bray bray
+            return; 
         }
 
         if (isGroup && automakerMintaPasif && apakahOwnerYgNgetIK) {
