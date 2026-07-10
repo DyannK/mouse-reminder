@@ -130,15 +130,31 @@ function getNick(jid, pushName, config, style = 'stable', groupJid = null) {
         'samuel': { stable: 'samuel', short: 'sam', variants: ['sam', 'samuel', 'samms'] }
     };
     
-    // CEK JALUR KAMUS BERSARANG BERBASIS KAMAR GRUP YAN
     let mappedName = null;
-    if (groupJid && config.groupMappings?.[groupJid]?.[jid]) {
-        mappedName = config.groupMappings[groupJid][jid];
+    const rawSenderNum = jid.split('@')[0];
+
+    // 1. Cek kamar grup bersarang memakai pencocokan string hibrida
+    if (groupJid && config.groupMappings?.[groupJid]) {
+        const kamarGrup = config.groupMappings[groupJid];
+        mappedName = kamarGrup[jid];
+        
+        if (!mappedName) {
+            // Jalur pencarian backup jika key terdaftar berupa nomor biasa tapi pengirim memakai LID
+            const ketemuKey = Object.keys(kamarGrup).find(k => k.includes(rawSenderNum) || rawSenderNum.includes(k.split('@')[0]));
+            if (ketemuKey) mappedName = kamarGrup[ketemuKey];
+        }
     }
     
-    // Fallback ke kamus global bawaan lama jika sub-kamar ga ketemu bray
-    if (!mappedName) mappedName = config.accountMapping?.[jid];
-    if (!mappedName && jid === config.ownerJid) mappedName = 'dyan';
+    // 2. Cek database global menggunakan pencocokan hibrida
+    if (!mappedName && config.accountMapping) {
+        mappedName = config.accountMapping[jid];
+        if (!mappedName) {
+            const ketemuGlobalKey = Object.keys(config.accountMapping).find(k => k.includes(rawSenderNum) || rawSenderNum.includes(k.split('@')[0]));
+            if (ketemuGlobalKey) mappedName = config.accountMapping[ketemuGlobalKey];
+        }
+    }
+    
+    if (!mappedName && (jid.includes('169810692436109') || jid === config.ownerJid)) mappedName = 'dyan';
     if (!mappedName) mappedName = pushName || 'coy';
     
     let firstName = mappedName.trim().split(/\s+/)[0].toLowerCase();
