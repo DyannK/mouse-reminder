@@ -444,7 +444,7 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
     
     let bodyText = messageTemplate || '';
     
-    // 1. PROSES SUBSTUSI VARIABEL UTAMA (Mendukung susunan teks dinamis lo bray)
+    // 1. PROSES SUBSTUSI VARIABEL UTAMA
     if (context.sisa) bodyText = bodyText.replace(/{sisa}/g, context.sisa);
     if (context.judul) bodyText = bodyText.replace(/{judul}/g, context.judul);
     
@@ -454,18 +454,24 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
         const { buildStyleInstruction } = require('./styleProfiler');
         let tema = messageTemplate.replace('AI:', '').trim();
         
-        tema += `\n\nAturan format tulisan: wajib gunakan huruf kecil semua (lowercase) untuk seluruh kalimat dan kata panggilan, KECUALI untuk singkatan teknis, istilah/definisi khusus yang jarang disebutkan, atau produk unpopular yang aslinya memang berupa kapital penuh (contoh: FIFO, LIFO). Jangan gunakan huruf kapital untuk nama orang atau di awal kalimat biasa bray.`;
+        // SENSOR OTOMATIS: Cek apakah user sengaja mengetik prompt AI dengan huruf kapital semua bray
+        const cleanPrompt = tema.replace(/[^a-zA-Z]/g, '');
+        const isAllUps = cleanPrompt.length > 0 && tema === tema.toUpperCase();
+
+        if (isAllUps) {
+            tema += `\n\nAturan format tulisan: Kamu WAJIB menggunakan HURUF KAPITAL SEMUA (ALL CAPS/UPPERCASE) untuk seluruh teks output tanpa kecuali! Jangan pakai huruf kecil sama sekali bray!`;
+        } else {
+            tema += `\n\nAturan format tulisan: wajib gunakan huruf kecil semua (lowercase) untuk seluruh kalimat dan kata panggilan, KECUALI untuk singkatan teknis, istilah/definisi khusus yang jarang disebutkan, atau produk unpopular yang aslinya memang berupa kapital penuh (contoh: FIFO, LIFO). Jangan gunakan huruf kapital untuk nama orang atau di awal kalimat biasa bray.`;
+        }
         
         const styleInstruction = buildStyleInstruction(jid);
         const aiRes = await generateAIText(tema, context, styleInstruction, manualFallback, formal);
         bodyText = aiRes.text;
         
-        // Kembalikan hasil olahan cerdas AI secara utuh tanpa perlu ditumpuk bray
         return { text: bodyText, usedFallback: false };
     }
 
     // 3. JALUR UTAMA TEMPLATE MANUAL/KUSTOM
-    // Langsung balikkan isi teks template murni yang udah bersih yan, biar ga double pesan pasif lagi!
     return { text: bodyText, usedFallback: false };
 }
 

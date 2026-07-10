@@ -101,7 +101,10 @@ async function callAIWithHybridRotation(prompt, isJson = false, systemInstructio
     return { text: null };
 }
 
-function buildGayaInstruction() {
+function buildGayaInstruction(isUppercase = false) {
+    if (isUppercase) {
+        return 'gaya bahasa wajib menggunakan HURUF KAPITAL SEMUA (ALL CAPS/UPPERCASE) untuk seluruh kalimat, kata panggilan, dan penjelas tanpa kecuali bray! jangan gunakan huruf kecil sama sekali! buat ekspresinya mengalir sangat santai marah, ketus, atau tegas sesuai tema wa anak tongkrongan sehari-hari. dilarang keras menyisipkan tanda koma tepat sebelum panggilan nama. buang total atau kurangi penggunaan tanda baca berlebih atau lebay.';
+    }
     // ATURAN SAKLEK UNTUK TETAP MEMPERTAHANKAN KAPITALISASI FIFO/LIFO BRAY!
     return 'gaya bahasa wajib menggunakan huruf kecil semua (lowercase) untuk seluruh kalimat dan kata panggilan, KECUALI untuk singkatan teknis, istilah/definisi khusus yang jarang disebutkan, atau produk unpopular yang aslinya memang berupa kapital penuh (contoh: FIFO, LIFO). jangan gunakan huruf kapital untuk nama orang atau di awal kalimat biasa bray. mengalir sangat santai natural seperti wa anak tongkrongan sehari-hari. dilarang keras menyisipkan tanda koma tepat sebelum panggilan nama (contoh salah: "apa, yan?", "halo, med". contoh benar: "apa yan", "halo med"). buang total atau kurangi penggunaan tanda baca berlebih atau lebay seperti !?, double tanda tanya, atau koma beruntun.';
 }
@@ -115,11 +118,15 @@ async function generateAIText(tema, context = {}, styleInstruction = null, manua
     else if (context.sisa) prompt += ` sisa waktu: ${context.sisa}.`;
     if (context.judul) prompt += ` judul agenda: ${context.judul}.`;
     
-    const result = await callAIWithHybridRotation(prompt, false, buildGayaInstruction());
-    // HAPUS .toLowerCase() BIAR ISTILAH KHUSUS KELUARAN GEMINI TETAP TERJAGA KAPITALNYA BRAY
-    if (result.text) return { text: result.text, usedFallback: false };
+    // DETEKSI OTOMATIS SAKLAR HURUF KAPITAL DARI RESOLVE TEMPLATE BRAY
+    const isUppercase = tema.includes("HURUF KAPITAL SEMUA");
     
-    return { text: fallbackText.toLowerCase(), usedFallback: true };
+    const result = await callAIWithHybridRotation(prompt, false, buildGayaInstruction(isUppercase));
+    if (result.text) {
+        return { text: isUppercase ? result.text.toUpperCase() : result.text, usedFallback: false };
+    }
+    
+    return { text: isUppercase ? fallbackText.toUpperCase() : fallbackText.toLowerCase(), usedFallback: true };
 }
 
 async function generateTagReply(triggerText, styleInstruction = null) {
@@ -171,6 +178,7 @@ pilihan intent:
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
 aturan ekstraksi parameter untuk "create_schedule":
+- PENENTUAN TIPE AGENDA ("type"): Kamu WAJIB mengisi dengan string "deadline" jika user menyebutkan kata "deadline" atau menetapkan suatu target tugas dengan batas tanggal selesai yang pasti di masa depan, meskipun di dalamnya terdapat permintaan pengingat harian ("setiap hari"). Nilai "recurring" HANYA digunakan jika agenda tersebut murni berupa jadwal rutin berkala selamanya tanpa batas tanggal akhir yang pasti (seperti jadwal kuliah mingguan).
 - TANGGAL TARGET: Ambil tanggal, bulan, dan tahun target utama yang disebutkan user (misal: "14 juli 2026"). Konversikan menjadi string format absolut "YYYY-MM-DD" di properti "tanggal". Jika tidak ada, default null bray.
 - BATAS AWAL HARIAN: Jika user meminta pengingat harian mulai dari tanggal tertentu (misal: "pengingat mulai dari tanggal 11 setiap hari"), tangkap tanggal awal tersebut dan masukkan ke properti "dailyReminderStartDate" dengan format "YYYY-MM-DD". Jika tidak disebutkan, beri nilai null bray.
 - JAM HARIAN DINAMIS: Jika user meminta jam pengingat harian spesifik (misal: "setiap hari di jam 9 malam"), konversikan jam tersebut menjadi format digital 24 jam "HH:MM" (misal: "21:00") di properti "dailyReminderTime". Jika tidak ada, default null bray.
@@ -180,7 +188,7 @@ aturan ekstraksi parameter untuk "create_schedule":
   1. User minta alarm jam 10:50 malam -> selisih 10 menit, masukkan angka [10].
   2. User minta alarm jam 9 malam -> selisih 2 jam (2 * 60), masukkan angka [120].
   3. User minta alarm jam 8 pagi -> selisih 15 jam (15 * 60), masukkan angka [900].
-  Susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones" bray!
+  Susun menjadi array angka terurut dari terbesar ke terkecil di Recycling atau kustom hari H bray!
 - jika user meminta alarm berbasis interval rutin atau setiap menit tanpa tanggal kaku, isi properti "intervalMinutes" dengan angka menit tersebut, dan buat "customMilestones" menjadi null bray.
 - jika user menyebutkan kata pembatalan laporan, set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
 - jika user merujuk ke diri sendiri, kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". 
