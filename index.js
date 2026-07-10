@@ -303,10 +303,17 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
     );
 
     const jamHarianTeks = data.dailyReminderTime || '20:00';
-    let skemaText = data.type === 'recurring'
-        ? `${milestones.length} kali pengingat rutin (setiap pola cron berdetak)`
-        : `${milestones.length} kali total pengingat (aktif: rutin harian jam ${jamHarianTeks} & kustom hari H [${(data.customMilestones || []).join(', ')}])`;
-
+    let skemaText = '';
+    
+    if (data.type === 'recurring') {
+        skemaText = `${milestones.length} kali pengingat rutin (setiap pola cron berdetak)`;
+    } else if (data.intervalMinutes && data.intervalMinutes > 0) {
+        // JALUR BARU: Jika draf mendeteksi adanya interval menit aktif bray bray
+        skemaText = `${milestones.length} kali total pengingat (aktif: interval tiap ${data.intervalMinutes} menit)`;
+    } else {
+        skemaText = `${milestones.length} kali total pengingat (aktif: rutin harian jam ${jamHarianTeks} & kustom hari H [${(data.customMilestones || []).join(', ')}])`;
+    }
+    
     // SIRKUIT BARU: Menyusun baris rincian kalender absolut lintas minggu biar makin detail bray
     let barisWaktuTambahan = '';
     if (data.type === 'recurring') {
