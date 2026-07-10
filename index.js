@@ -685,6 +685,7 @@ async function generateAndSendTeamReport(sock, reminder, config) {
     if (!targetGrupJid) return;
 
     let report = `*[laporan akhir keaktifan kelompok]*\nagenda: *[${reminder.judul}]*\n\n`;
+    let laporanMentions = []; // Wadah penampung sirkuit tag biru wa bray
 
     try {
         if (!groupCache[targetGrupJid]) {
@@ -711,19 +712,30 @@ async function generateAndSendTeamReport(sock, reminder, config) {
             const track = reminder.teamTracking?.[jid] || { status: 'Belum Respon', reason: '', isDelivered: true };
             const apakahAdaMissed = reminder.missedMilestones && reminder.missedMilestones.length > 0;
 
+            const nomorMurni = jid.split('@')[0];
+            let teksSubjekFinal = '';
+
+            // SIRKUIT STRATEGI TAG HIBRIDA: Deteksi akun alay atau belum kenalan bray bray
+            if (namaOrang === member.pushName || namaOrang === 'coy' || namaOrang === 'bray') {
+                teksSubjekFinal = `@${nomorMurni}`; // Paksa pake tag biru murni biar otentik bray
+            } else {
+                teksSubjekFinal = `${namaOrang} (@${nomorMurni})`; // Kombinasi nama asli + tag ganda
+            }
+            laporanMentions.push(jid); // Daftarkan kunci JID ke sirkuit wa bray
+
             if (track.status === 'Hadir') {
-                listHadir.push(`- ${namaOrang} (respon: ${track.message || 'bisa'})`);
+                listHadir.push(`- ${teksSubjekFinal} (respon: ${track.message || 'bisa'})`);
             } else if (track.status === 'Absen') {
-                listAbsen.push(`- ${namaOrang} (alasan: ${track.reason || 'ada urusan'})`);
+                listAbsen.push(`- ${teksSubjekFinal} (alasan: ${track.reason || 'ada urusan'})`);
             } else if (track.status === 'Abu-Abu') {
-                listNgilang.push(`- ${namaOrang} (awal sempet bilang: ${track.reason || 'gatau'}, abis itu ngilang)`);
+                listNgilang.push(`- ${teksSubjekFinal} (awal sempet bilang: ${track.reason || 'gatau'}, abis itu ngilang)`);
             } else {
                 if (apakahAdaMissed && track.interrogationStage === 0) {
-                    listGagalServer.push(`- ${namaOrang} (gagal terabsen / server sempat down bray)`);
+                    listGagalServer.push(`- ${teksSubjekFinal} (gagal terabsen / server sempat down bray)`);
                 } else if (track.isDelivered === false) {
-                    listCentangSatu.push(`- ${namaOrang} (nomor ga aktif / centang 1)`);
+                    listCentangSatu.push(`- ${teksSubjekFinal} (nomor ga aktif / centang 1)`);
                 } else {
-                    listPasif.push(`- ${namaOrang} (silent reader / menyimak)`);
+                    listPasif.push(`- ${teksSubjekFinal} (silent reader / menyimak)`);
                 }
             }
         }
@@ -736,7 +748,9 @@ async function generateAndSendTeamReport(sock, reminder, config) {
         if (listCentangSatu.length > 0) report += `*🚫 nomor tidak aktif (centang 1):*\n${listCentangSatu.join('\n')}\n\n`;
 
         const teksFinalLaporan = report.trim();
-        await sock.sendMessage(targetGrupJid, { text: teksFinalLaporan });
+        
+        // KUNCI UTAMA: Tembak laporan ke grup lengkap dengan array mentions aktif bray!
+        await sock.sendMessage(targetGrupJid, { text: teksFinalLaporan, mentions: laporanMentions });
 
         if (!config.reports) config.reports = [];
         
@@ -745,7 +759,7 @@ async function generateAndSendTeamReport(sock, reminder, config) {
             id: existingRepIdx !== -1 ? config.reports[existingRepIdx].id : `rep_${Date.now().toString().slice(-4)}`,
             agendaId: reminder.id,
             judul: reminder.judul,
-            groupJidTarget: targetGrupJid,                                        // KUNCI AMAN ID KAMAR GRUP SASARAN BRAY
+            groupJidTarget: targetGrupJid,
             tanggal: new Date().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }),
             teks: teksFinalLaporan
         };
