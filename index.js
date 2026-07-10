@@ -2139,7 +2139,11 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                     }
                 }
 
-                if (['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke', 'okee', 'okss', 'sipp', 'sippp'].some(w => lowText === w || lowText.includes(w))) {
+                // SIRKUIT BARU: Kunci kata kunci penutup sesi agar wajib berupa chat pendek murni bray
+                const kataKunciTutup = ['udahan', 'sip', 'oke dah', 'oke deh', 'makasih', 'thanks', 'yaudah', 'bray', 'oke', 'okee', 'okss', 'sipp', 'sippp'];
+                const isMintaTutupMurni = kataKunciTutup.some(w => lowText === w) || (kataKunciTutup.some(w => lowText.includes(w)) && lowText.length <= 10 && !lowText.includes('kenal'));
+
+                if (isMintaTutupMurni) {
                     if (userStates[fromJid] && userStates[fromJid].mode === 'chat') {
                         resetState(fromJid);
                         await sock.sendMessage(fromJid, { text: `oke siap obrolan gue tutup ya bray ${currentNick}` }, { quoted: msg });
@@ -2149,20 +2153,34 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
 
                 setState(fromJid, 'chat');
                 
+                setState(fromJid, 'chat');
+                
                 let pesanBalasanFinal = '';
                 
                 if (isGroup) {
-                    // JALUR KASUAL: Langsung petakan transkrip apa adanya tanpa memblokir chat pake notice bray
                     const transkripObrolan = groupChatMemory[fromJid] && groupChatMemory[fromJid].length > 0
                         ? groupChatMemory[fromJid].map(c => `[${c.sender}]: ${c.text}`).join('\n')
                         : '(belum ada lini percakapan terekam sebelum chat ini bray)';
                     
-                    const opiniPrompt = `Lu adalah anggota kelompok kuliah yang cerdas, solutif, dan menyimak dinamika obrolan grup dari pojokan room chat sirkel kuliah. Hari ini lu diajak mengobrol, ditanya pendapat, atau dimintai solusi oleh si ${currentNick} dengan muatan kalimat pertanyaan: "${processingText}".
+                    // SIRKUIT EKSTRAKSI DATABASE: Tarik list nama anak-anak yang didaftarkan di kamar grup ini bray
+                    const kamusGrupSekarang = config.groupMappings?.[fromJid] || {};
+                    const daftarOrangDikenal = Object.entries(kamusGrupSekarang)
+                        .map(([jid, nama]) => `- ${nama} (nomor hp: ${jid.split('@')[0]})`)
+                        .join('\n') || '- (belum ada anggota kelompok yang didaftarkan di kamar grup ini bray bray)';
+
+                    const opiniPrompt = `Lu adalah anggota kelompok kuliah yang cerdas, solutif, dan menyimak dinamika obrolan grup dari pojokan room chat sirkel kuliah. Hari ini lu diajak mengobrol, ditanya pendapat, atau ditanya apakah mengenal seseorang oleh si ${currentNick} dengan muatan kalimat: "${processingText}".
                     
-                    Berikut transkrip baris obrolan singkat anak-anak sebelumnya di kamar ini (urut kronologis dari past ke now):
+                    Berikut adalah daftar nama anggota kelompok yang resmi terdaftar dan lu kenal di dalam database kamar grup ini bray:
+                    ${daftarOrangDikenal}
+                    
+                    Berikut transkrip baris obrolan singkat anak-anak sebelumnya di kamar ini bray:
                     ${transkripObrolan}
                     
-                    Aturan gaya tulisan wajib: Kamu harus membalas dengan sangat santai menggunakan gaya bahasa lu-gue anak tongkrongan sehari-hari bray. Wajib gunakan huruf kecil semua untuk seluruh teks keluaran tanpa kecuali bray. Hilangkan total identitas lu sebagai robot, langsung jawab intisari chatnya secara natural bray!`;
+                    Aturan respons wajib peladen:
+                    1. Jawab dengan sangat santai menggunakan gaya bahasa lu-gue anak tongkrongan sehari-hari bray bray.
+                    2. Wajib gunakan huruf kecil semua untuk seluruh teks keluarannya tanpa kecuali bray.
+                    3. Jika user menanyakan apakah lu kenal dengan seseorang (seperti mencantumkan tag nama @orang atau menyebut nama tertentu), cocokkan teks tersebut secara cerdas dengan daftar nama orang dikenal di atas bray. Jika namanya terdaftar cocok, jawab kalau lu kenal dia adalah anak kelompok di grup ini bray. Jika tidak ada di daftar, jawab dengan jujur dan kasual kalau nomor atau namanya belum lu daftarin pake perintah daftarin bray bray.
+                    4. Hilangkan total identitas lu sebagai robot atau kecerdasan buatan bray bray bray!`;
                     
                     const { generateAIText } = require('./geminiClient');
                     const aiOpiniRes = await generateAIText(opiniPrompt, {}, '', 'sori bray otak gue lagi agak nge-lag, coba jelasin intinya aja bray', false);
