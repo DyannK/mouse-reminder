@@ -68,6 +68,19 @@ function writeGroupLog(jid, sender, text) {
     fs.writeFileSync(logFilePath, JSON.stringify(logs, null, 2), 'utf-8');
 }
 
+function safeExtractAndParseJSON(rawText) {
+    try {
+        const start = rawText.indexOf('{');
+        const end = rawText.lastIndexOf('}');
+        if (start !== -1 && end !== -1 && end > start) {
+            return JSON.parse(rawText.slice(start, end + 1));
+        }
+        return JSON.parse(rawText.replace(/```json|```/gi, '').trim());
+    } catch (e) {
+        throw new Error(`Format JSON tidak valid bray: ${rawText}`);
+    }
+}
+
 function readGroupLogs(jid, count = 100) {
     if (!fs.existsSync(logFilePath)) return [];
     try {
@@ -949,20 +962,31 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
 
         config.reminders.push({
             id: data.type === 'recurring' ? `rec_${Date.now().toString().slice(-4)}` : `ai_${Date.now().toString().slice(-4)}`,
-            type: data.type || 'deadline',
+            type: data.type || 'deadline', 
             scope: finalScope,
-            targetTimestamp: targetTimestamp,
-            tanggal: data.tanggal || null,
-            dailyReminderStartDate: data.dailyReminderStartDate || null, // KUNCI BATAS AWAL TANGGAL YAN
-            dailyReminderTime: data.dailyReminderTime || null,           // KUNCI JAM HARIAN DINAMIS BRAY
-            withDailyReminder: data.withDailyReminder || false,
+            targetTimestamp: data.type === 'recurring' ? null : targetTimestamp,
+            tanggal: data.tanggal || null,                                // SINKRONISASI DATA TANGGAL ABSOLUT
+            dailyReminderStartDate: data.dailyReminderStartDate || null,  // SINKRONISASI BATAS AWAL HARIAN
+            dailyReminderTime: data.dailyReminderTime || null,            // SINKRONISASI JAM HARIAN DINAMIS
+            withDailyReminder: data.withDailyReminder || false,           // SINKRONISASI SAKELAR HARIAN
+            cronPattern: data.cronPattern || null, 
             judul: data.judul || 'agenda kasual',
             message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
             manualFallback: data.judul || 'agenda kasual',
-            targets: [fromJid],
-            mediaPath: localPath,
-            mediaType: messageType === 'imageMessage' ? 'image' : 'video',
-            teamTracking: {}
+            nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
+            nowManualFallback: data.judul || 'agenda kasual',
+            milestones: data.type === 'recurring' ? null : finalMilestones,
+            customMilestones: data.customMilestones || null,
+            firedMilestones: [],
+            pendingAITexts: {},
+            targets: finalScope === 'group' ? ['group'] : targetJidsFinal, 
+            mediaPath: null,
+            mediaType: null,
+            teamTracking: {},
+            creator: data.creator || 'dyan',       
+            creatorJid: data.creatorJid || '',
+            withTracking: data.withTracking !== false,
+            withReport: data.withReport !== false
         });
 
         saveConfig(config);
@@ -1436,8 +1460,9 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 try {
                     const { generateAIText } = require('./geminiClient');
                     const aiRes = await generateAIText(promptRevisiWaktuLampau, {}, '', '{}', false);
-                    const cleanJsonStr = aiRes.text.replace(/```json|```/gi, '').trim();
-                    const ptResult = JSON.parse(cleanJsonStr);
+                    
+                    // MENGGUNAKAN TAMENG EKSTRAKSI AMAN BARU DI AREA PAST TIME CHECK
+                    const ptResult = safeExtractAndParseJSON(aiRes.text);
 
                     if (ptResult.keputusan === 'besok') {
                         setState(fromJid, 'confirm_schedule', state.data);
@@ -1604,7 +1629,11 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 // ====================================================================
                 // LAPIS 3: JALUR CERDAS INTERPRETASI KETIKAN KASUAL MANUSIA (AI BASIS SEMESTA)
                 // ====================================================================
+                const komponenSekarang = getJakartaDateComponents(new Date());
+                const stringHariIni = `${komponenSekarang.year}-${komponenSekarang.month.padStart(2, '0')}-${komponenSekarang.day.padStart(2, '0')}`;
+
                 const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
+Acuan tanggal HARI INI secara riil: ${stringHariIni} bray!
 Data draf saat ini: ${JSON.stringify(state.data)}
 User membalas dengan ketikan bebas: "${text}"
 
@@ -1613,28 +1642,26 @@ Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentu
 2. "edit": Jika user ingin memperbaiki parameter draf (mengubah judul, jam, target, skema alarm kustom, template pesan durasi, maupun template pesan sekarang).
 
 Aturan pengubahan parameter objek jika keputusan bernilai "edit":
+- Jika user menyebutkan kata "hari ini" atau mengubah hari operasi ke hari ini, kamu WAJIB mengubah properti "tanggal" menjadi string "${stringHariIni}" secara akurat bray!
 - Jika user meminta alarm berbasis interval rutin atau permenit (misal: "skema alarm dibikin interval permenit", "interval 1 menit"), isi properti "intervalMinutes" dengan angka menit tersebut, dan set properti "customMilestones" menjadi null bray.
 - Jika user meminta alarm di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
-- Jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
-- Jika user meminta menyamakan template durasi dengan template eksekusi (misal: "template durasi samain kaya eksekusi"), salin isi string template eksekusi draf saat ini (yaitu teks mutlak: "${state.data.pesanNow || 'sekarang waktunya {judul} bray!'}") ke parameter "pesanDurasi".
-- Jika user meminta menyamakan template eksekusi dengan template durasi (misal: "template eksekusi samain kaya template durasi"), salin isi string template durasi draf saat ini (yaitu teks mutlak: "${state.data.pesanDurasi || 'waktunya {judul} bentar lagi nih!'}") ke parameter "pesanNow".
+- Jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones and intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
+- Jika user meminta menyamakan template durasi dengan template eksekusi, salin isi string template eksekusi draf saat ini (yaitu teks mutlak: "${state.data.pesanNow || 'sekarang waktunya {judul} bray!'}") ke parameter "pesanDurasi".
+- Jika user meminta menyamakan template eksekusi dengan template durasi, salin isi string template durasi draf saat ini (yaitu teks mutlak: "${state.data.pesanDurasi || 'waktunya {judul} bentar lagi nih!'}") ke parameter "pesanNow".
 - Jika user mengubah judul, isi properti "judul" dengan nama agenda baru.
 - Jika user mengubah jam/waktu, isi properti "waktu" dengan format HH:MM digital.
 - Jika user mengubah template pesan durasi, masukkan teks kalimat barunya ke properti "pesanDurasi".
 - Jika user mengubah template pesan sekarang (H-0), masukkan teks kalimat barunya ke property "pesanNow".
-- Jika user meminta target penerima diubah ke dirinya sendiri, isi properti "extractedTarget" with string murni "sender". 
+- Jika user meminta target penerima diubah ke dirinya sendiri, isi properti "extractedTarget" dengan string murni "sender". 
 - KHUSUS KOREKSI DATABASE KONTAK: Jika user memerintahkan pembaruan database nomor hp, tangkap data tersebut dan masukkan ke dalam properti objek "update_database_kontak" dengan sub-properti "nama" dan "nomor".
-- jika user meminta alarm berbasis interval rutin atau permenit (misal: "skema alarm diganti jadi permenit", "interval 1 menit"), isi properti "intervalMinutes" dengan angka menit tersebut, dan kamu WAJIB memaksa properti "customMilestones" bernilai null bray!
-- jika user meminta alarm di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
-- jika user meminta mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat (misal: "template durasi dan eksekusi nya gini..."), kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string teks yang sama tersebut bray!
-- jika user memasukkan kata "AI:" di dalam teks template barunya, isi teks "AI:" tersebut adalah string literal mutlak yang wajib lu pertahankan utuh di dalam properti pesanDurasi atau pesanNow, jangan pernah dipotong!
-- jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
-- Jika user meminta memindahkan, menukar, atau menggeser posisi marka (misal: "AI: di template durasi dan eksekusi di tuker ke depan"), kamu WAJIB menyusun ulang seluruh string template tersebut dari awal dengan meletakkan kata "AI: " di posisi paling awal string pesanDurasi dan pesanNow bray!
+- Jika user meminta mengubah template durasi DAN eksekusi secara bersamaan dalam satu kalimat, kamu WAJIB mengisi KEDUA properti "pesanDurasi" dan "pesanNow" dengan nilai string teks yang sama tersebut bray!
+- Jika user memasukkan kata "AI:" di dalam teks template barunya, isi teks "AI:" tersebut adalah string literal mutlak yang wajib lu pertahaman utuh di dalam properti pesanDurasi atau pesanNow, jangan pernah dipotong!
+- Jika user meminta memindahkan, menukar, atau menggeser posisi marka, kamu WAJIB menyusun ulang seluruh string template tersebut dari awal dengan meletakkan kata "AI: " di posisi paling awal string bray!
 - Jika user mengubah skema alarm menjadi interval rutin atau permenit, kamu WAJIB memaksa nilai properti "startTime" di objek draf ini menjadi null bray, agar hitungan matematika selisih jamnya tidak rusak kembali ke 0.
-- Jika user mengubah pola pengulangan rutin (misal: "ubah jadwalnya jadi tiap hari jumat jam 09:00"), kamu WAJIB memperbarui properti "type" menjadi "recurring" dan buatkan susunan format linux cron 5 digit terbaru di properti "cronPattern" secara akurat bray!
-- Jika user merevisi waktu alarm di hari terakhir menggunakan jam dinding kaku (misal: "di hari terakhir ingetin jam 8 pagi dan 9 malam"), kamu WAJIB menghitung selisih menit mundur dari jam alarm tersebut menuju jam target utama agenda saat ini, lalu masukkan hasilnya berupa array angka menit mundur ke dalam properti "customMilestones" bray!
-- Jika user membahas atau merubah skema pengingat harian (misal: "matikan pengingat harian", "pengingat harian aktifin"), set properti "withDailyReminder" menjadi true atau false secara akurat bray!
-- Jika user mengubah tanggal awal harian atau jam harian (misal: "ganti pengingat hariannya jadi mulai tanggal 12 jam 8 malam"), perbarui parameter "dailyReminderStartDate" dengan format YYYY-MM-DD dan "dailyReminderTime" dengan format HH:MM secara akurat bray!
+- Jika user mengubah pola pengulangan rutin, kamu WAJIB memperbarui properti "type" menjadi "recurring" dan buatkan susunan format linux cron 5 digit terbaru di properti "cronPattern" secara akurat bray!
+- Jika user merevisi waktu alarm di hari terakhir menggunakan jam dinding kaku, kamu WAJIB menghitung selisih menit mundur dari jam alarm tersebut menuju jam target utama agenda saat ini, lalu masukkan hasilnya berupa array angka menit mundur ke dalam properti "customMilestones" bray!
+- Jika user membahas atau merubah skema pengingat harian, set properti "withDailyReminder" menjadi true atau false secara akurat bray!
+- Jika user mengubah tanggal awal harian atau jam harian, perbarui parameter "dailyReminderStartDate" dengan format YYYY-MM-DD dan "dailyReminderTime" dengan format HH:MM secara akurat bray!
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
@@ -1642,8 +1669,9 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
   "parameter_berubah": {
     "judul": string atau null,
     "waktu": string atau null,
+    "tanggal": string atau null,
     "customMilestones": array atau null,
-    "intervalMinutes": number atau null,
+    "intervalMinutes": number or null,
     "pesanDurasi": string atau null,
     "pesanNow": string atau null,
     "withReport": boolean atau null,
@@ -1660,8 +1688,9 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 try {
                     const { generateAIText } = require('./geminiClient');
                     const aiRes = await generateAIText(promptDinamisAI, {}, '', '{}', false);
-                    const cleanJsonStr = aiRes.text.replace(/```json|```/gi, '').trim();
-                    const updateResult = JSON.parse(cleanJsonStr);
+                    
+                    // MENGGUNAKAN TAMENG EKSTRAKSI AMAN BARU AGAR TIDAK CRASH SAAT ADA TEKS PENGANTAR AI BRAY
+                    const updateResult = safeExtractAndParseJSON(aiRes.text);
 
                     if (updateResult.keputusan === 'batal') {
                         resetState(fromJid);
@@ -1699,6 +1728,7 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         // CLONE BACKUP MEMORI RAM SEBELUM DIMUTASI (Untuk Rollback jika meledak)
                         const backupJudul = state.data.judul;
                         const backupWaktu = state.data.waktu;
+                        const backupTanggal = state.data.tanggal;
                         const backupCustomMilestones = state.data.customMilestones ? [...state.data.customMilestones] : null;
                         const backupIntervalMinutes = state.data.intervalMinutes;
                         const backupPesanDurasi = state.data.pesanDurasi;
@@ -1715,9 +1745,6 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         // ====================================================================
                         // SISTEM PEMBERSIH OTOMATIS: PENJAGA KONSISTENSI DATA PASCA-EDIT BRAY
                         // ====================================================================
-                        const komponenSekarang = getJakartaDateComponents(new Date());
-                        const stringHariIni = `${komponenSekarang.year}-${komponenSekarang.month.padStart(2, '0')}-${komponenSekarang.day.padStart(2, '0')}`;
-
                         // Saringan A: Jika tanggal diubah jadi hari ini, sapu bersih seluruh paket harian menuju hari H
                         if (state.data.tanggal === stringHariIni) {
                             state.data.withDailyReminder = false;
@@ -1751,13 +1778,14 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         }
 
                         // BENTENG PENGAMAN ANTI-BYPASS: Uji kelayakan jumlah deret milestones baru bray
-                        const intervalCheck = state.data.intervalMinutes; // || 1 SUDAH RESMI DICABUT YAN BIAR GA KORSLETING MALAM
+                        const intervalCheck = state.data.intervalMinutes; 
                         const testCalculated = calculateMilestonesArray(state.data.waktu, state.data.startTime, intervalCheck, state.data.customMilestones, state.data.tanggal, state.data.withDailyReminder, state.data.dailyReminderStartDate, state.data.dailyReminderTime);
 
                         if (testCalculated.length > 30) {
                             // ROLLBACK DATA RAM INSTAN KARENA JEBOL
                             state.data.judul = backupJudul;
                             state.data.waktu = backupWaktu;
+                            state.data.tanggal = backupTanggal;
                             state.data.customMilestones = backupCustomMilestones;
                             state.data.intervalMinutes = backupIntervalMinutes;
                             state.data.pesanDurasi = backupPesanDurasi;
@@ -1767,11 +1795,10 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                             return;
                         }
                         
-                        // KIRIM UTUH BESERTA LOGGING DEBUG BARU KE LAYAR WA LU BRAY
                         const debugInfoData = {
                             inputText: text,
                             keputusan: updateResult.keputusan,
-                            rawPayload: cleanJsonStr
+                            rawPayload: JSON.stringify(updateResult, null, 2)
                         };
 
                         await sendDetailedConfirmation(sock, fromJid, state.data, msg, debugInfoData);
