@@ -156,7 +156,7 @@ aturan mutlak:
     return result.text ? result.text : 'waduh otak gue ngeblank bentar bray';
 }
 
-async function parseIntentFromText(triggerText) {
+async function parseIntentFromText(triggerText, konteksWaktuMurni = null) {
     const lowText = triggerText.toLowerCase();
 
     const readKeywords = ['lihat', 'liat', 'cek', 'tampilkan', 'tampilin', 'list', 'info', 'ada apa aja', 'gimana aja'];
@@ -173,15 +173,16 @@ async function parseIntentFromText(triggerText) {
     }
 
     let system = `lu adalah mesin pembaca niat khusus bahasa indonesia. analisa kalimat dan kembalikan JSON murni.
+${konteksWaktuMurni ? `ACUAN WAKTU SEKARANG SECARA RIIL: ${konteksWaktuMurni}\nGunakan acuan tersebut untuk menghitung tanggal absolut di properti "tanggal" dan waktu digital di properti "waktu" secara presisi jika user menggunakan kata relatif seperti 'hari ini', 'besok', '3 menit dari sekarang', 'jam 9 malam'.` : ''}
 pilihan intent:
 1. "create_schedule": jika pengguna ingin membuat jadwal atau reminder atau deadline DAN menyebutkan jam serta judul aktivitas.
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
 aturan ekstraksi parameter untuk "create_schedule":
 - PENENTUAN TIPE AGENDA ("type"): Kamu WAJIB mengisi dengan string "deadline" jika user menyebutkan kata "deadline" atau menetapkan suatu target tugas dengan batas tanggal selesai yang pasti di masa depan, meskipun di dalamnya terdapat permintaan pengingat harian. Nilai "recurring" HANYA digunakan jika agenda tersebut murni berupa jadwal rutin berkala selamanya tanpa batas tanggal akhir yang pasti.
-- TANGGAL TARGET: Ambil tanggal, bulan, dan tahun target utama yang disebutkan user. Konversikan menjadi string format absolut "YYYY-MM-DD" di properti "tanggal". Jika tidak ada, default null bray.
-- BATAS AWAL HARIAN: Jika user meminta pengingat harian mulai dari tanggal tertentu, tangkap tanggal awal tersebut dan masukkan ke properti "dailyReminderStartDate" dengan format "YYYY-MM-DD". Jika tidak disebutkan, beri nilai null bray.
-- JAM HARIAN DINAMIS: Jika user meminta jam pengingat harian spesifik, konversikan jam tersebut menjadi format digital 24 jam "HH:MM" di properti "dailyReminderTime". Jika tidak ada, default null bray.
+- TANGGAL TARGET: Ambil tanggal, bulan, dan tahun target utama yang disebutkan user (misal: "14 juli 2026"). Konversikan menjadi string format absolut "YYYY-MM-DD" di properti "tanggal". Jika tidak ada, default null bray.
+- BATAS AWAL HARIAN: Jika user meminta pengingat harian mulai dari tanggal tertentu (misal: "pengingat mulai dari tanggal 11 setiap hari"), tangkap tanggal awal tersebut dan masukkan ke properti "dailyReminderStartDate" dengan format "YYYY-MM-DD". Jika tidak disebutkan, beri nilai null bray.
+- JAM HARIAN DINAMIS: Jika user meminta jam pengingat harian spesifik (misal: "setiap hari di jam 9 malam"), konversikan jam tersebut menjadi format digital 24 jam "HH:MM" (misal: "21:00") di properti "dailyReminderTime". Jika tidak ada, default null bray.
 - SAKELAR HARIAN: set properti "withDailyReminder" menjadi true jika user meminta pengingat harian.
 - KAMUS VIBES INDIVIDUAL ("targetVibes"): Jika user secara spesifik meminta gaya, suasana, atau emosi penagihan yang berbeda untuk orang tertentu (misal: "buat prayoga dan fizar vibesnya marah-marahin, trus helmi vibesnya santai aja nagihnya"), tangkap nama panggilan tersebut sebagai KEY huruf kecil semua, dan deskripsi emosinya sebagai VALUE berupa string di dalam objek "targetVibes". Jika tidak ada reques kustom per orang, isi dengan null bray.
 - ATURAN CUSTOM MILESTONES: Properti "customMilestones" HANYA berisi larik angka menit hitung mundur khusus untuk hari terakhir saja sebelum target utama dimulai bray! Jangan hitung pengingat harian di sini.

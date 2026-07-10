@@ -980,7 +980,9 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
         const localPath = path.join('./', `media_${Date.now()}.${ext}`);
         fs.writeFileSync(localPath, buffer);
 
-        const intent = await parseIntentFromText(captionText);
+        const kpsn = getJakartaDateComponents(new Date());
+        const konteksWaktuMurni = `${kpsn.year}-${kpsn.month.padStart(2, '0')}-${kpsn.day.padStart(2, '0')} Jam ${kpsn.hour.padStart(2, '0')}:${kpsn.minute.padStart(2, '0')} WIB`;
+        const intent = await parseIntentFromText(captionText, konteksWaktuMurni);
         const targetTime = intent.waktu || "07:00";
 
         config.reminders.push({
@@ -1655,9 +1657,11 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                 // ====================================================================
                 const komponenSekarang = getJakartaDateComponents(new Date());
                 const stringHariIni = `${komponenSekarang.year}-${komponenSekarang.month.padStart(2, '0')}-${komponenSekarang.day.padStart(2, '0')}`;
+                const jamSekarangIni = `${komponenSekarang.hour.padStart(2, '0')}:${komponenSekarang.minute.padStart(2, '0')}`;
 
                 const promptDinamisAI = `Kamu adalah mesin pembaca niat koreksi manifes agenda kuliah.
-Acuan tanggal HARI INI secara riil: ${stringHariIni} bray!
+ACUAN TANGGAL HARI INI SECARA RIIL: ${stringHariIni} bray!
+ACUAN JAM SEKARANG SECARA RIIL: ${jamSekarangIni} WIB bray! Gunakan acuan ini untuk menghitung secara akurat jika user menggunakan kata keterangan waktu relatif seperti "5 menit kedepan", "setengah jam lagi", "1 jam kemudian".
 Data draf saat ini: ${JSON.stringify(state.data)}
 User membalas dengan ketikan bebas: "${text}"
 
@@ -1667,13 +1671,14 @@ Tugas kamu adalah memetakan niat perkataan user dan mengembalikannya dalam bentu
 
 Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - Jika user menyebutkan kata "hari ini" atau mengubah hari operasi ke hari ini, kamu WAJIB mengubah properti "tanggal" menjadi string "${stringHariIni}" secara akurat bray!
+- Jika user mengubah waktu menggunakan pernyataan jam relatif (misal: "jamnya itu 5 menit kedepan", "setengah jam lagi", "10 menit dari sekarang"), hitung secara matematika dari acuan JAM SEKARANG (${jamSekarangIni}) lalu masukkan hasilnya dengan format HH:MM digital ke properti "waktu" bray!
 - Jika user meminta alarm berbasis interval rutin atau permenit (misal: "skema alarm dibikin interval permenit", "interval 1 menit"), isi properti "intervalMinutes" dengan angka menit tersebut, dan set properti "customMilestones" menjadi null bray.
 - Jika user meminta alarm di menit-menit tertentu, ambil seluruh angka menit tersebut, susun menjadi array angka terurut dari terbesar ke terkecil di properti "customMilestones", dan buat nilai "intervalMinutes" menjadi null.
-- Jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones and intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
+- Jika user tidak mengubah atau tidak membahas skema alarm di chat barunya, JANGAN masukkan properti customMilestones dan intervalMinutes ke dalam objek parameter_berubah (biarkan kosong atau undefined) agar data lama tidak terhapus bray!
 - Jika user meminta menyamakan template durasi dengan template eksekusi, salin isi string template eksekusi draf saat ini (yaitu teks mutlak: "${state.data.pesanNow || 'sekarang waktunya {judul} bray!'}") ke parameter "pesanDurasi".
 - Jika user meminta menyamakan template eksekusi dengan template durasi, salin isi string template durasi draf saat ini (yaitu teks mutlak: "${state.data.pesanDurasi || 'waktunya {judul} bentar lagi nih!'}") ke parameter "pesanNow".
 - Jika user mengubah judul, isi properti "judul" dengan nama agenda baru.
-- Jika user mengubah jam/waktu, isi properti "waktu" dengan format HH:MM digital.
+- Jika user mengubah jam/waktu menggunakan jam dinding kaku (misal: "ubah jadi jam 13:00"), isi properti "waktu" dengan format HH:MM digital tersebut bray.
 - Jika user mengubah template pesan durasi, masukkan teks kalimat barunya ke properti "pesanDurasi".
 - Jika user mengubah template pesan sekarang (H-0), masukkan teks kalimat barunya ke property "pesanNow".
 - Jika user meminta target penerima diubah ke dirinya sendiri, isi properti "extractedTarget" dengan string murni "sender". 
@@ -1686,7 +1691,6 @@ Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - Jika user merevisi waktu alarm di hari terakhir menggunakan jam dinding kaku, kamu WAJIB menghitung selisih menit mundur dari jam alarm tersebut menuju jam target utama agenda saat ini, lalu masukkan hasilnya berupa array angka menit mundur ke dalam properti "customMilestones" bray!
 - Jika user membahas atau merubah skema pengingat harian, set properti "withDailyReminder" menjadi true atau false secara akurat bray!
 - Jika user mengubah tanggal awal harian atau jam harian, perbarui parameter "dailyReminderStartDate" dengan format YYYY-MM-DD dan "dailyReminderTime" dengan format HH:MM secara akurat bray!
-- Jika user mengubah atau menambahkan getaran emosi kustom orang tertentu (misal: "ubah vibe helmi jadi panik"), perbarui isi objek di dalam properti "targetVibes" dengan memasukkan nama orang tersebut sebagai key dan gaya barunya sebagai value secara akurat bray!
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
@@ -1911,7 +1915,9 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                                      .trim();
             }
 
-            const intentData = await parseIntentFromText(processingText);
+            const kpsn = getJakartaDateComponents(new Date());
+            const konteksWaktuMurni = `${kpsn.year}-${kpsn.month.padStart(2, '0')}-${kpsn.day.padStart(2, '0')} Jam ${kpsn.hour.padStart(2, '0')}:${kpsn.minute.padStart(2, '0')} WIB`;
+            const intentData = await parseIntentFromText(processingText, konteksWaktuMurni);
 
             if (intentData.intent === 'create_schedule') {
                 intentData.creator = currentNick;
