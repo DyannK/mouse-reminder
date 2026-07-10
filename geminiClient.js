@@ -178,6 +178,8 @@ pilihan intent:
 1. "create_schedule": jika pengguna ingin membuat jadwal atau reminder atau deadline DAN menyebutkan jam serta judul aktivitas.
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
+- ATURAN MUTLAK KONSISTENSI: Jika kamu memutuskan properti "intent" bernilai "chat", maka seluruh properti parameter lainnya di dalam objek JSON (seperti type, tanggal, judul, waktu, pesanNow, pesanDurasi, dll) WAJIB murni kamu isi dengan nilai null bray! Jangan pernah coba-coba menyalin teks chatan biasa ke dalam properti jadwalan jika jenis niatnya cuma mengobrol biasa.
+
 aturan ekstraksi parameter untuk "create_schedule":
 - PENENTUAN TIPE AGENDA ("type"): Kamu WAJIB mengisi dengan string "deadline" jika user menyebutkan kata "deadline" atau menetapkan suatu target tugas dengan batas tanggal selesai yang pasti di masa depan, meskipun di dalamnya terdapat permintaan pengingat harian. Nilai "recurring" HANYA digunakan jika agenda tersebut murni berupa jadwal rutin berkala selamanya tanpa batas tanggal akhir yang pasti.
 - TANGGAL TARGET: Ambil tanggal, bulan, dan tahun target utama yang disebutkan user (misal: "14 juli 2026"). Konversikan menjadi string format absolut "YYYY-MM-DD" di properti "tanggal". Jika tidak ada, default null bray.
@@ -189,6 +191,7 @@ aturan ekstraksi parameter untuk "create_schedule":
 - jika user meminta alarm berbasis interval rutin atau setiap menit tanpa tanggal kaku, isi properti "intervalMinutes" dengan angka menit tersebut, dan buat "customMilestones" menjadi null bray.
 - jika user menyebutkan kata pembatalan laporan, set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
 - jika user merujuk ke diri sendiri, kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". 
+
 
 format output json murni:
 {
