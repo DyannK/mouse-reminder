@@ -1113,21 +1113,43 @@ async function startBot() {
         let config = loadConfig();
         
         // ====================================================================
-        // SIRKUIT PEMBEKUAN OTAK BOT OTOMATIS (KATUP PENJAGA KUOTA API GEMINI)
+        // MONITOR DEBUGGING TERMUX LIVE MULTI-GROUP
         // ====================================================================
         if (!config.activatedGroups) config.activatedGroups = [];
         const isBotActiveInGroup = config.activatedGroups.includes(fromJid);
+        
+        if (isGroup) {
+            console.log(`🔍 [DEBUG LIVE MULTI-GROUP]`);
+            console.log(`   • ID Kamar Grup Target : ${fromJid}`);
+            console.log(`   • Nomor JID Pengirim   : ${senderJid}`);
+            console.log(`   • Status Otak Bot      : ${isBotActiveInGroup ? 'CEPAT/AKTIF' : 'BEKU/NONAKTIF'}`);
+            console.log(`   • Isi Teks Mentah      : "${text}"`);
+            console.log(`   • Deteksi Perintah Baku: "${cmd}"`);
+        }
+
+        // ====================================================================
+        // SIRKUIT PEMBEKUAN OTAK BOT OTOMATIS (VERSI PEKA SENSOR TAG GRUP)
+        // ====================================================================
+        const apakahMintaAktif = lowText.includes('/botaktif');
+        const automakerMintaPasif = lowText.includes('/botpasif');
+        const apakahOwnerYgNgetik = fromJid === config.ownerJid || senderJid === config.ownerJid;
 
         if (isGroup && !isBotActiveInGroup) {
-            if (cmd === '/botaktif' && (fromJid === config.ownerJid || senderJid === config.ownerJid)) {
+            if (apakahMintaAktif && apakahOwnerYgNgetik) {
                 config.activatedGroups.push(fromJid);
                 saveConfig(config);
                 await sock.sendMessage(fromJid, { text: '🔊 *[sirkuit otak diaktifkan]*\nhalo bray! bot resmi mencair dan stand by mengawal sirkel kamar grup ini sekarang!' }, { quoted: msg });
+                return;
             }
-            return; // Blokir total interaksi grup asing jika bot masih dalam mode beku bray
+            
+            // Cetak peringatan di konsol Termux lo jika ada chat masuk pas bot masih beku
+            if (isBotMentioned) {
+                console.log(`⚠️ [PEMBERITAHUAN] Pesan dari grup ini diabaikan peladen karena statusnya masih beku bray.`);
+            }
+            return; // Katup pengunci total agar bot tidak merespon chat lain sebelum aktif
         }
 
-        if (isGroup && cmd === '/botpasif' && (fromJid === config.ownerJid || senderJid === config.ownerJid)) {
+        if (isGroup && automakerMintaPasif && apakahOwnerYgNgetik) {
             config.activatedGroups = config.activatedGroups.filter(g => g !== fromJid);
             saveConfig(config);
             await sock.sendMessage(fromJid, { text: '🔕 *[sirkuit otak dibekukan]*\nbot resmi masuk mode tidur senyap bray. panggil owner buat ketik /botaktif lagi kalo mau nyalain.' }, { quoted: msg });
