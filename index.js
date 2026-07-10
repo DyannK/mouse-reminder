@@ -444,48 +444,29 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
     
     let bodyText = messageTemplate || '';
     
-    // 1. PROSES ISI UTAMA AGENDA (Biar tetep rapi mendukung kapital normal)
+    // 1. PROSES SUBSTUSI VARIABEL UTAMA (Mendukung susunan teks dinamis lo bray)
     if (context.sisa) bodyText = bodyText.replace(/{sisa}/g, context.sisa);
     if (context.judul) bodyText = bodyText.replace(/{judul}/g, context.judul);
     
+    // 2. JALUR KHUSUS JIKA TEMPLATE MEMAKAI AWALAN PEMICU AI
     if ((messageTemplate || '').startsWith('AI:')) {
         const { generateAIText } = require('./geminiClient');
         const { buildStyleInstruction } = require('./styleProfiler');
         let tema = messageTemplate.replace('AI:', '').trim();
         
-        // SUNTIKKAN ATURAN FORMAT KAPITALISASI KHUSUS SESUAI KEINGINAN LU YAN
         tema += `\n\nAturan format tulisan: wajib gunakan huruf kecil semua (lowercase) untuk seluruh kalimat dan kata panggilan, KECUALI untuk singkatan teknis, istilah/definisi khusus yang jarang disebutkan, atau produk unpopular yang aslinya memang berupa kapital penuh (contoh: FIFO, LIFO). Jangan gunakan huruf kapital untuk nama orang atau di awal kalimat biasa bray.`;
         
         const styleInstruction = buildStyleInstruction(jid);
         const aiRes = await generateAIText(tema, context, styleInstruction, manualFallback, formal);
         bodyText = aiRes.text;
-    }
-
-    // 2. RACIK KALIMAT PENGANTAR DINAMIS LEWAT GEMINI (Huruf kecil semua & koma ritmis)
-    const targetNick = getNick(jid, '', config, 'stable');
-    const agendaJudul = context.judul || 'agenda kelompok';
-    
-    const introPrompt = `Buat satu kalimat pendek kasual untuk mengantar pesan pengingat agenda "${agendaJudul}" buat si ${targetNick}. 
-    Aturan wajib:
-    1. Gunakan huruf kecil semua (lowercase).
-    2. Masukkan nama panggilan ${targetNick} di dalam kalimatnya.
-    3. Gunakan tanda baca koma hanya untuk jeda ritme bicara yang natural saat diucapkan (rhythmic parsing), jangan ditaruh kaku di ujung nama jika ritmenya tidak pas.
-    4. Buat bervariasi dan dinamis (contoh: "ini jadwalnya ya ${targetNick}, coba dicek dulu" atau "nih ${targetNick}, jangan lupa sama agendanya").
-    5. Hasil output hanya teks kalimat pengantarnya saja tanpa penjelas tambahan, tanpa tanda kutip.`;
-
-    try {
-        const { generateAIText } = require('./geminiClient');
-        const aiIntro = await generateAIText(introPrompt, {}, '', 'ini pengingatnya bray', false);
-        const cleanIntro = aiIntro.text.trim().toLowerCase();
         
-        // Gabungkan pengantar kasual (huruf kecil) dan isi agenda (kapital rapi) bray
-        const pesanFinal = `${cleanIntro}\n\n${bodyText}`;
-        return { text: pesanFinal, usedFallback: false };
-    } catch (err) {
-        console.error('gagal ngeracik intro dinamis:', err.message);
-        // Fallback aman jika server AI bermasalah
-        return { text: `nih pengingatnya ya ${targetNick},\n\n${bodyText}`, usedFallback: true };
+        // Kembalikan hasil olahan cerdas AI secara utuh tanpa perlu ditumpuk bray
+        return { text: bodyText, usedFallback: false };
     }
+
+    // 3. JALUR UTAMA TEMPLATE MANUAL/KUSTOM
+    // Langsung balikkan isi teks template murni yang udah bersih yan, biar ga double pesan pasif lagi!
+    return { text: bodyText, usedFallback: false };
 }
 
 async function deliverToJids(sock, reminder, targetTextMap) {
