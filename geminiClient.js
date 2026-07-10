@@ -178,17 +178,13 @@ pilihan intent:
 2. "chat": jika hanya mengobrol biasa atau menyapa.
 
 aturan ekstraksi parameter untuk "create_schedule":
-- PENENTUAN TIPE AGENDA ("type"): Kamu WAJIB mengisi dengan string "deadline" jika user menyebutkan kata "deadline" atau menetapkan suatu target tugas dengan batas tanggal selesai yang pasti di masa depan, meskipun di dalamnya terdapat permintaan pengingat harian ("setiap hari"). Nilai "recurring" HANYA digunakan jika agenda tersebut murni berupa jadwal rutin berkala selamanya tanpa batas tanggal akhir yang pasti (seperti jadwal kuliah mingguan).
-- TANGGAL TARGET: Ambil tanggal, bulan, dan tahun target utama yang disebutkan user (misal: "14 juli 2026"). Konversikan menjadi string format absolut "YYYY-MM-DD" di properti "tanggal". Jika tidak ada, default null bray.
-- BATAS AWAL HARIAN: Jika user meminta pengingat harian mulai dari tanggal tertentu (misal: "pengingat mulai dari tanggal 11 setiap hari"), tangkap tanggal awal tersebut dan masukkan ke properti "dailyReminderStartDate" dengan format "YYYY-MM-DD". Jika tidak disebutkan, beri nilai null bray.
-- JAM HARIAN DINAMIS: Jika user meminta jam pengingat harian spesifik (misal: "setiap hari di jam 9 malam"), konversikan jam tersebut menjadi format digital 24 jam "HH:MM" (misal: "21:00") di properti "dailyReminderTime". Jika tidak ada, default null bray.
+- PENENTUAN TIPE AGENDA ("type"): Kamu WAJIB mengisi dengan string "deadline" jika user menyebutkan kata "deadline" atau menetapkan suatu target tugas dengan batas tanggal selesai yang pasti di masa depan, meskipun di dalamnya terdapat permintaan pengingat harian. Nilai "recurring" HANYA digunakan jika agenda tersebut murni berupa jadwal rutin berkala selamanya tanpa batas tanggal akhir yang pasti.
+- TANGGAL TARGET: Ambil tanggal, bulan, dan tahun target utama yang disebutkan user. Konversikan menjadi string format absolut "YYYY-MM-DD" di properti "tanggal". Jika tidak ada, default null bray.
+- BATAS AWAL HARIAN: Jika user meminta pengingat harian mulai dari tanggal tertentu, tangkap tanggal awal tersebut dan masukkan ke properti "dailyReminderStartDate" dengan format "YYYY-MM-DD". Jika tidak disebutkan, beri nilai null bray.
+- JAM HARIAN DINAMIS: Jika user meminta jam pengingat harian spesifik, konversikan jam tersebut menjadi format digital 24 jam "HH:MM" di properti "dailyReminderTime". Jika tidak ada, default null bray.
 - SAKELAR HARIAN: set properti "withDailyReminder" menjadi true jika user meminta pengingat harian.
-- ATURAN CUSTOM MILESTONES: Properti "customMilestones" HANYA berisi larik angka menit hitung mundur khusus untuk hari terakhir (hari H) saja sebelum target utama dimulai bray! Jangan hitung pengingat harian di sini.
-  *Contoh Konversi Hari H*: Jika target jam 23:00 WIB.
-  1. User minta alarm jam 10:50 malam -> selisih 10 menit, masukkan angka [10].
-  2. User minta alarm jam 9 malam -> selisih 2 jam (2 * 60), masukkan angka [120].
-  3. User minta alarm jam 8 pagi -> selisih 15 jam (15 * 60), masukkan angka [900].
-  Susun menjadi array angka terurut dari terbesar ke terkecil di Recycling atau kustom hari H bray!
+- KAMUS VIBES INDIVIDUAL ("targetVibes"): Jika user secara spesifik meminta gaya, suasana, atau emosi penagihan yang berbeda untuk orang tertentu (misal: "buat prayoga dan fizar vibesnya marah-marahin, trus helmi vibesnya santai aja nagihnya"), tangkap nama panggilan tersebut sebagai KEY huruf kecil semua, dan deskripsi emosinya sebagai VALUE berupa string di dalam objek "targetVibes". Jika tidak ada reques kustom per orang, isi dengan null bray.
+- ATURAN CUSTOM MILESTONES: Properti "customMilestones" HANYA berisi larik angka menit hitung mundur khusus untuk hari terakhir saja sebelum target utama dimulai bray! Jangan hitung pengingat harian di sini.
 - jika user meminta alarm berbasis interval rutin atau setiap menit tanpa tanggal kaku, isi properti "intervalMinutes" dengan angka menit tersebut, dan buat "customMilestones" menjadi null bray.
 - jika user menyebutkan kata pembatalan laporan, set properti "withReport" menjadi false. jika tidak disebutkan, secara default beri nilai true.
 - jika user merujuk ke diri sendiri, kamu WAJIB mengisi properti "extractedTarget" dengan string murni "sender". 
@@ -201,6 +197,7 @@ format output json murni:
   "dailyReminderStartDate": "string format YYYY-MM-DD atau null",
   "dailyReminderTime": "string format HH:MM atau null",
   "withDailyReminder": boolean,
+  "targetVibes": object atau null,
   "judul": "string atau null",
   "waktu": "string format HH:MM atau null",
   "intervalMinutes": number atau null,

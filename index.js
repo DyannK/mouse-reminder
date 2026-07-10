@@ -313,7 +313,7 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
     } else {
         skemaText = `${milestones.length} kali total pengingat (aktif: rutin harian jam ${jamHarianTeks} & kustom hari H [${(data.customMilestones || []).join(', ')}])`;
     }
-    
+
     // SIRKUIT BARU: Menyusun baris rincian kalender absolut lintas minggu biar makin detail bray
     let barisWaktuTambahan = '';
     if (data.type === 'recurring') {
@@ -323,6 +323,14 @@ async function sendDetailedConfirmation(sock, jid, data, quotedMsg = null, debug
         if (data.withDailyReminder) {
             barisWaktuTambahan += `• *Rentang Harian*: mulai ${data.dailyReminderStartDate || 'hari ini'} (tiap jam ${jamHarianTeks} wib)\n`;
         }
+    }
+
+    // GELEMBUNG BARU: Pratinjau emosi kustom per kepala anggota kelompok yan bray
+    if (data.targetVibes && Object.keys(data.targetVibes).length > 0) {
+        barisWaktuTambahan += `• *Vibe Kustom Target*:\n`;
+        Object.entries(data.targetVibes).forEach(([nama, emosi]) => {
+            barisWaktuTambahan += `  - ${nama}: vibes ${emosi}\n`;
+        });
     }
 
     let debugHeaderTeks = '';
@@ -455,13 +463,34 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
     if (context.sisa) bodyText = bodyText.replace(/{sisa}/g, context.sisa);
     if (context.judul) bodyText = bodyText.replace(/{judul}/g, context.judul);
     
-    // 2. JALUR KHUSUS JIKA TEMPLATE MEMAKAI AWALAN PEMICU AI
-    if ((messageTemplate || '').startsWith('AI:')) {
+    // 2. DETEKSI APAKAH NOMOR INI MEMILIKI REQUES EMOSI KUSTOM INDIVIDUAL YAN
+    const namaKamus = config.accountMapping?.[jid] || (jid.includes('169810692436109') || jid === config.ownerJid ? 'dyan' : '');
+    const adaVibeKustom = context.targetVibes && namaKamus && context.targetVibes[namaKamus.toLowerCase()];
+
+    // 3. JALUR KHUSUS JIKA TEMPLATE MEMAKAI AWALAN PEMICU AI ATAU MEMILIKI VIBE KUSTOM TARGET
+    if ((messageTemplate || '').startsWith('AI:') || adaVibeKustom) {
         const { generateAIText } = require('./geminiClient');
         const { buildStyleInstruction } = require('./styleProfiler');
-        let tema = messageTemplate.replace('AI:', '').trim();
         
-        // SENSOR OTOMATIS: Cek apakah user sengaja mengetik prompt AI dengan huruf kapital semua bray
+        let tema = bodyText;
+        if (bodyText.startsWith('AI:')) {
+            tema = bodyText.replace('AI:', '').trim();
+        } else {
+            // Katup otomatis: Jika template aslinya statis tapi target punya emosi kustom, paksa konversi ke prompt AI bray bray
+            tema = `ingetin buat ngerjain agenda dengan muatan dasar kalimat: "${bodyText}"`;
+        }
+        
+        // SUNTIKKAN INTERSEPTOR EMOSI KUSTOM DI SINI YAN BRAY!
+        if (adaVibeKustom) {
+            const emosiSpesifik = context.targetVibes[namaKamus.toLowerCase()];
+            tema += `\n\nKOREKSI GAYA BAHASA KHUSUS UNTUK TARGET ${namaKamus.toUpperCase()}: Kamu WAJIB mengabaikan seluruh instruksi emosi atau vibe umum di atas bray! Ganti dan wajib gunakan getaran emosi/vibe/karakteristik bicara secara mutlak yaitu: "${emosiSpesifik}".`;
+            
+            // Otomatisasi Caps Lock jika penulisan emosinya huruf besar semua
+            if (emosiSpesifik === emosiSpesifik.toUpperCase() && emosiSpesifik.replace(/[^a-zA-Z]/g, '').length > 0) {
+                tema += `\nAturan tambahan: Wajib gunakan HURUF KAPITAL SEMUA (ALL CAPS) untuk outputnya bray bray!`;
+            }
+        }
+
         const cleanPrompt = tema.replace(/[^a-zA-Z]/g, '');
         const isAllUps = cleanPrompt.length > 0 && tema === tema.toUpperCase();
 
@@ -478,7 +507,7 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
         return { text: bodyText, usedFallback: false };
     }
 
-    // 3. JALUR UTAMA TEMPLATE MANUAL/KUSTOM
+    // 4. JALUR UTAMA TEMPLATE MANUAL STATIS TANPA AI
     return { text: bodyText, usedFallback: false };
 }
 
@@ -571,7 +600,7 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
             // STRATEGI 1: JIKA ANGGOTA SUDAH PASTI ABSEN (SELESAI INTEROGASI), LANGSUNG LEWATI
             if (userTrack.status === 'Absen') continue;
 
-            const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
+            const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes };
             const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
             const manualFallback = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
 
@@ -827,7 +856,7 @@ async function checkDeadlines(sock) {
                 }).filter(Boolean);
 
                 const targetTextMap = {};
-                const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto };
+                const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes };
                 const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
                 const manualFallback = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
 
@@ -897,7 +926,7 @@ function setupSchedules(sock) {
 
                 const targetTextMap = {};
                 for (const jid of targetJids) {
-                    const context = { sisa: 'sekarang', judul: reminder.judul, isNow: true };
+                    const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes };
                     targetTextMap[jid] = (await resolveTemplateForJid(reminder.message, reminder.manualFallback, jid, context, reminder.formal)).text;
                 }
                 await deliverToJids(sock, reminder, targetTextMap);
@@ -961,9 +990,10 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
             targetTimestamp: data.type === 'recurring' ? null : targetTimestamp,
             tanggal: data.tanggal || null,                                // SINKRONISASI DATA TANGGAL ABSOLUT
             dailyReminderStartDate: data.dailyReminderStartDate || null,  // SINKRONISASI BATAS AWAL HARIAN
-            dailyReminderTime: data.dailyReminderTime || null,            // SINKRONISASI JAM HARIAN DINAMIS
-            withDailyReminder: data.withDailyReminder || false,           // SINKRONISASI SAKELAR HARIAN
-            cronPattern: data.cronPattern || null, 
+            dailyReminderTime: data.dailyReminderTime || null,           
+            withDailyReminder: data.withDailyReminder || false,
+            targetVibes: data.targetVibes || null,                        // KUNCI AMAN DATA EMOSI KUSTOM DI DATABASE
+            cronPattern: data.cronPattern || null,
             judul: data.judul || 'agenda kasual',
             message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
             manualFallback: data.judul || 'agenda kasual',
@@ -1656,6 +1686,7 @@ Aturan pengubahan parameter objek jika keputusan bernilai "edit":
 - Jika user merevisi waktu alarm di hari terakhir menggunakan jam dinding kaku, kamu WAJIB menghitung selisih menit mundur dari jam alarm tersebut menuju jam target utama agenda saat ini, lalu masukkan hasilnya berupa array angka menit mundur ke dalam properti "customMilestones" bray!
 - Jika user membahas atau merubah skema pengingat harian, set properti "withDailyReminder" menjadi true atau false secara akurat bray!
 - Jika user mengubah tanggal awal harian atau jam harian, perbarui parameter "dailyReminderStartDate" dengan format YYYY-MM-DD dan "dailyReminderTime" dengan format HH:MM secara akurat bray!
+- Jika user mengubah atau menambahkan getaran emosi kustom orang tertentu (misal: "ubah vibe helmi jadi panik"), perbarui isi objek di dalam properti "targetVibes" dengan memasukkan nama orang tersebut sebagai key dan gaya barunya sebagai value secara akurat bray!
 
 Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tanpa tulisan json, dan tanpa teks penjelas apa pun:
 {
