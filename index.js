@@ -411,12 +411,11 @@ async function handleListDetail(sock, fromJid, senderJid) {
     const isOwner = fromJid === config.ownerJid || senderJid === config.ownerJid;
     const isGroup = fromJid.endsWith('@g.us');
     
-    // KATUP PENYARING HIRARKI PRIVASI GRUP BRAY
     if (isGroup) {
         reminders = reminders.filter(r => r.groupJidTarget === fromJid);
     } else if (!isOwner) {
         reminders = reminders.filter(r => r.groupJidTarget === null || (r.teamTracking && r.teamTracking[senderJid]));
-    } // Owner lewat PC bebas ngintip total lintas jagat raya bray bray!
+    }
 
     if (reminders.length === 0) {
         await sock.sendMessage(fromJid, { text: 'jadwal lu lagi kosong bersih bray.' });
@@ -426,7 +425,13 @@ async function handleListDetail(sock, fromJid, senderJid) {
     reminders.forEach((r, idx) => {
         msg += `*${idx + 1}. [${r.judul}]* (ID: ${r.id})\n`;
         msg += `• tipe: ${r.type}\n`;
+        msg += `• status pelacakan tim: ${r.withTracking ? '🟢 aktif' : '🔴 nonaktif / silent'}\n`;
+        msg += `• status laporan grup: ${r.withReport ? '🟢 aktif' : '🔴 nonaktif'}\n`;
         
+        if (r.groupJidTarget) {
+            msg += `• kamar grup target: ${r.groupJidTarget}\n`;
+        }
+
         if (r.targets && r.targets.length > 0) {
             const listTargetBersih = r.targets.map(t => {
                 if (t === 'group') return 'grup kuliah';
@@ -450,37 +455,25 @@ async function handleListDetail(sock, fromJid, senderJid) {
             msg += `• milestones:\n`;
             r.milestones.forEach(m => {
                 let labelTeksFinal = m.label;
-                
                 if (r.targetTimestamp && m.totalMinutes !== undefined) {
                     const waktuAlarmMs = r.targetTimestamp - (m.totalMinutes * 60 * 1000);
                     const komponenJam = getJakartaDateComponents(new Date(waktuAlarmMs));
                     const teksJamMenit = `${String(komponenJam.hour).padStart(2, '0')}:${String(komponenJam.minute).padStart(2, '0')} WIB`;
-                    
                     const mKey = milestoneKey(m);
                     const sudahKirim = r.firedMilestones && r.firedMilestones.includes(mKey);
                     const kenaMiss = r.missedMilestones && r.missedMilestones.includes(mKey);
                     
                     let emojiStatus = '⏳';
                     let teksStatus = '(menunggu waktu)';
+                    if (kenaMiss) { emojiStatus = '❌'; teksStatus = '(gagal/server down)'; }
+                    else if (sudahKirim) { emojiStatus = '✅'; teksStatus = '(terkirim)'; }
                     
-                    if (kenaMiss) {
-                        emojiStatus = '❌';
-                        teksStatus = '(gagal/server down)';
-                    } else if (sudahKirim) {
-                        emojiStatus = '✅';
-                        teksStatus = '(terkirim)';
-                    }
-                    
-                    if (m.totalMinutes === 0) {
-                        labelTeksFinal = `${emojiStatus} [${teksJamMenit}] agenda dimulai ${teksStatus}`;
-                    } else {
-                        labelTeksFinal = `${emojiStatus} [${teksJamMenit}] pengingat ${m.totalMinutes} menit ${teksStatus}`;
-                    }
+                    if (m.totalMinutes === 0) labelTeksFinal = `${emojiStatus} [${teksJamMenit}] agenda dimulai ${teksStatus}`;
+                    else labelTeksFinal = `${emojiStatus} [${teksJamMenit}] pengingat ${m.totalMinutes} menit ${teksStatus}`;
                 }
                 msg += `  - ${labelTeksFinal}\n`;
             });
         }
-        if (r.mediaPath) msg += `• berkas media: ${path.basename(r.mediaPath)}\n`;
         msg += `-------------------------------------------\n`;
     });
     await sock.sendMessage(fromJid, { text: msg.trim() });
@@ -525,17 +518,26 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
         }
 
         const cleanPrompt = tema.replace(/[^a-zA-Z]/g, '');
-        const isAllUps = cleanPrompt.length > 0 && tema === tema.toUpperCase();
+        const lowTema = tema.toLowerCase();
+        
+        // Sirkuit pendeteksi kata kunci teriakan capslock manusia bray
+        const mengandungKataCaps = lowTema.includes('capslock') || lowTema.includes('kapital semua') || lowTema.includes('all caps') || lowTema.includes('huruf besar semua');
+        const isAllUps = (cleanPrompt.length > 0 && tema === tema.toUpperCase()) || mengandungKataCaps;
+
 
         if (isAllUps) {
             tema += `\n\nAturan format tulisan: Kamu WAJIB menggunakan HURUF KAPITAL SEMUA (ALL CAPS/UPPERCASE) untuk seluruh teks output tanpa kecuali! Jangan pakai huruf kecil sama sekali bray!`;
+            const styleInstruction = buildStyleInstruction(jid);
+            const aiRes = await generateAIText(tema, context, styleInstruction, manualFallback, formal);
+            bodyText = aiRes.text.toUpperCase(); // PEMAKSAAN ELEKTRONIK 100% MUTLAK CAPSLOCK BRAY!
+            return { text: bodyText, usedFallback: false };
         } else {
             tema += `\n\nAturan format tulisan: wajib gunakan huruf kecil semua (lowercase) untuk seluruh kalimat dan kata panggilan, KECUALI untuk singkatan teknis, istilah/definisi khusus yang jarang disebutkan, atau produk unpopular yang aslinya memang berupa kapital penuh (contoh: FIFO, LIFO). Jangan gunakan huruf kapital untuk nama orang atau di awal kalimat biasa bray.`;
+            const styleInstruction = buildStyleInstruction(jid);
+            const aiRes = await generateAIText(tema, context, styleInstruction, manualFallback, formal);
+            bodyText = aiRes.text.toLowerCase(); // SINKRONISASI LOWERCASING SEJATI BIAR GA NGASAL BRAY
+            return { text: bodyText, usedFallback: false };
         }
-        
-        const styleInstruction = buildStyleInstruction(jid);
-        const aiRes = await generateAIText(tema, context, styleInstruction, manualFallback, formal);
-        bodyText = aiRes.text;
         
         return { text: bodyText, usedFallback: false };
     }
@@ -705,102 +707,74 @@ async function generateAndSendTeamReport(sock, reminder, config) {
     }
 }
 
-async function generateAndSendTeamReport(sock, reminder, config) {
-    const targetGrupJid = reminder.groupJidTarget || config.groupJid;
-    if (!targetGrupJid) return;
-
-    let report = `*[laporan akhir keaktifan kelompok]*\nagenda: *[${reminder.judul}]*\n\n`;
-    let laporanMentions = [];
-
+async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
     try {
+        const targetGrupJid = reminder.groupJidTarget || config.groupJid;
+        if (!targetGrupJid) return;
+
+        if (!reminder.teamTracking || Object.keys(reminder.teamTracking).length === 0) {
+            reminder.teamTracking = await initializeTeamTracking(sock, targetGrupJid, config);
+            saveConfig(config);
+        }
+
         if (!groupCache[targetGrupJid]) {
             groupCache[targetGrupJid] = await sock.groupMetadata(targetGrupJid);
             setTimeout(() => { delete groupCache[targetGrupJid]; }, 10 * 60 * 1000);
         }
-
+        
         const groupMeta = groupCache[targetGrupJid];
         const members = groupMeta.participants || [];
         
-        let listHadir = [];
-        let listAbsen = [];
-        let listNgilang = [];
-        let listPasif = [];
-        let listCentangSatu = [];
-        let listGagalServer = [];
-
         for (const member of members) {
-            const jid = member.id;
-            if (jid.includes(botJidNumber)) continue;
-            if (reminder.scope === 'tertarget' && !reminder.targets.includes(jid)) continue;
+            const memberJid = member.id;
+            
+            if (memberJid.includes(botJidNumber) || memberJid === config.ownerJid) continue;
+            if (reminder.scope === 'tertarget' && !reminder.targets.includes(memberJid)) continue;
 
-            const namaOrang = getNick(jid, member.pushName, config, 'stable', targetGrupJid);
-            const track = reminder.teamTracking?.[jid] || { status: 'Belum Respon', reason: '', isDelivered: true };
-            const apakahAdaMissed = reminder.missedMilestones && reminder.missedMilestones.length > 0;
+            const userTrack = reminder.teamTracking[memberJid] || { status: 'Belum Respon' };
+            if (userTrack.status === 'Absen') continue;
 
-            const nomorMurni = jid.split('@')[0];
-            let teksSubjekFinal = '';
+            const jedaIstirahatManusiawi = 2000 + Math.random() * 3000;
+            await new Promise(r => setTimeout(r, jedaIstirahatManusiawi));
 
-            if (namaOrang === member.pushName || namaOrang === 'coy' || namaOrang === 'bray') {
-                teksSubjekFinal = `@${nomorMurni}`;
-            } else {
-                teksSubjekFinal = `${namaOrang} (@${nomorMurni})`;
+            const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes, groupJidTarget: targetGrupJid };
+            const messageTemplate = milestone.isAuto ? reminder.nowMessage : reminder.message;
+            const manualFallback = milestone.isAuto ? reminder.nowManualFallback : reminder.manualFallback;
+
+            let { text } = await resolveTemplateForJid(messageTemplate, manualFallback, memberJid, context, reminder.formal);
+            
+            let catatanKaki = '';
+            if (userTrack.status === 'Belum Respon') {
+                catatanKaki = `\n\n*catatan:* balas pesan pribadi ini buat ngasih konfirmasi keaktifan lu di grup ya bray.`;
+            } else if (userTrack.status === 'Abu-Abu') {
+                catatanKaki = `\n\n*catatan:* kemaren kan lu billing gatau, gimana jadinya bray? sekarang udah bisa dipastikan belum? bales ya!`;
+            } else if (userTrack.status === 'Hadir') {
+                catatanKaki = `\n\n_lu kan udah konfirmasi hadir tadi, jadi tinggal stand by aja ya pas mulai, mantap bray!_`;
             }
-            laporanMentions.push(jid);
 
-            if (track.status === 'Hadir') {
-                listHadir.push(`- ${teksSubjekFinal} (respon: ${track.message || 'bisa'})`);
-            } else if (track.status === 'Absen') {
-                listAbsen.push(`- ${teksSubjekFinal} (alasan: ${track.reason || 'ada urusan'})`);
-            } else if (track.status === 'Abu-Abu') {
-                listNgilang.push(`- ${teksSubjekFinal} (awal sempet bilang: ${track.reason || 'gatau'}, abis itu ngilang)`);
-            } else {
-                if (apakahAdaMissed && track.interrogationStage === 0) {
-                    listGagalServer.push(`- ${teksSubjekFinal} (gagal terabsen / server sempat down bray)`);
-                } else if (track.isDelivered === false) {
-                    listCentangSatu.push(`- ${teksSubjekFinal} (nomor ga aktif / centang 1)`);
-                } else {
-                    listPasif.push(`- ${teksSubjekFinal} (silent reader / menyimak)`);
-                }
+            const pesanFinal = `${text}${catatanKaki}`;
+
+            const namaPanggilan = getNick(memberJid, member.pushName || 'bray', config, 'variant', targetGrupJid);
+            await sock.sendMessage(memberJid, { text: namaPanggilan.toLowerCase() });
+
+            await new Promise(r => setTimeout(r, 1000));
+            await sock.sendPresenceUpdate('composing', memberJid);
+            await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
+            
+            const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinal });
+            
+            if (reminder.teamTracking[memberJid]) {
+                reminder.teamTracking[memberJid].lastMsgId = sentMsg.key.id;
             }
+            
+            console.log(`[antrean sekuensial] sukses meneror chat pribadi ke target: ${namaPanggilan}`);
         }
 
-        if (listHadir.length > 0) report += `*✅ anggota hadir/aktif:*\n${listHadir.join('\n')}\n\n`;
-        if (listAbsen.length > 0) report += `*❌ anggota izin/absen:*\n${listAbsen.join('\n')}\n\n`;
-        if (listGagalServer.length > 0) report += `*⚠️ tidak sempat terinterogasi (sistem down):*\n${listGagalServer.join('\n')}\n\n`;
-        if (listNgilang.length > 0) report += `*⚠️ tidak konsisten (ngilang):*\n${listNgilang.join('\n')}\n\n`;
-        if (listPasif.length > 0) report += `*💤 silent reader (pasif):*\n${listPasif.join('\n')}\n\n`;
-        if (listCentangSatu.length > 0) report += `*🚫 nomor tidak aktif (centang 1):*\n${listCentangSatu.join('\n')}\n\n`;
-
-        const teksFinalLaporan = report.trim();
-        
-        await sock.sendMessage(targetGrupJid, { text: teksFinalLaporan, mentions: laporanMentions });
-
-        if (!config.reports) config.reports = [];
-        
-        const existingRepIdx = config.reports.findIndex(r => r.agendaId === reminder.id);
-        const reportData = {
-            id: existingRepIdx !== -1 ? config.reports[existingRepIdx].id : `rep_${Date.now().toString().slice(-4)}`,
-            agendaId: reminder.id,
-            judul: reminder.judul,
-            groupJidTarget: targetGrupJid,
-            tanggal: new Date().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }),
-            teks: teksFinalLaporan
-        };
-
-        if (existingRepIdx !== -1) {
-            config.reports[existingRepIdx] = reportData;
-        } else {
-            config.reports.push(reportData);
-        }
-        
         saveConfig(config);
-        console.log(`[arsip] laporan ${reminder.judul} berhasil disimpan dengan id ${reportData.id}`);
-
     } catch (err) {
-        console.error('gagal membuat laporan akhir kelompok:', err.message);
+        console.error('gagal distribusi sekuensial ke tim:', err);
     }
 }
-
 
 async function checkDeadlines(sock) {
     if (isCheckingDeadlines) return;
@@ -1299,7 +1273,7 @@ async function startBot() {
             msg.mentionedJid?.includes(botJidNumber) || 
             (botLidNumber && msg.mentionedJid?.includes(botLidNumber))
         );
-        
+
         // =================================================================
         // MESIN PENGENDUS HIBRIDA GRUP (LOGGING DATABASE & REKAM RAM PASIF)
         // =================================================================
@@ -1900,35 +1874,32 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
                         targetTimestamp = targetDate.getTime();
                     }
 
-                    const intervalVal = data.intervalMinutes;
-                    const finalMilestones = calculateMilestonesArray(data.waktu, data.startTime, intervalVal, data.customMilestones, data.tanggal, data.withDailyReminder);
-
                     let targetJidsFinal = [fromJid];
                     let finalScope = isGroup ? 'group' : 'personal';
-                    
+
+                    // PENGAMAN ABSOLUT GRUP TIM KELOMPOK YAN BRAY
+                    if (isGroup) {
+                        if (!data.extractedTarget || data.extractedTarget.toLowerCase() === 'sender' || data.extractedTarget.toLowerCase() === 'group') {
+                            finalScope = 'group';
+                            data.extractedTarget = null;
+                        }
+                    }
+
                     if (data.extractedTarget) {
                         const cleanTargetStr = data.extractedTarget.toLowerCase();
                         let mappedJids = [];
-                        
-                        if (cleanTargetStr === 'sender') {
-                            mappedJids.push(senderJid);
-                        } else {
+                        if (cleanTargetStr === 'sender') { mappedJids.push(senderJid); }
+                        else {
                             Object.entries(config.accountMapping || {}).forEach(([jid, name]) => {
-                                if (cleanTargetStr.includes(name.toLowerCase())) {
-                                    mappedJids.push(jid);
-                                }
+                                if (cleanTargetStr.includes(name.toLowerCase())) { mappedJids.push(jid); }
                             });
                         }
-
                         if (mappedJids.length > 0) {
                             targetJidsFinal = mappedJids;
                             finalScope = mappedJids[0] === senderJid && mappedJids.length === 1 ? 'personal' : 'tertarget'; 
                         } else {
                             const foundContact = config.contacts?.find(c => c.name.toLowerCase() === data.extractedTarget.toLowerCase());
-                            if (foundContact) {
-                                targetJidsFinal = [foundContact.jid];
-                                finalScope = 'personal';
-                            }
+                            if (foundContact) { targetJidsFinal = [foundContact.jid]; finalScope = 'personal'; }
                         }
                     }
 
