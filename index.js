@@ -1223,7 +1223,14 @@ async function startBot() {
         // ====================================================================
         // INTERCEPTOR KASUAL: HAPUS AGENDA SECARA OTOMATIS TANPA SLASH BRAY
         // ====================================================================
-        let isBotMentionedLokal = text && (text.includes(botJidNumber) || lowText.includes('bot') || msg.mentionedJid?.includes(botJidNumber));
+        // TAMENG SENSOR PEKA NOMOR HP & KODE IDENTITAS LID GRUP BRAY
+        let isBotMentionedLokal = text && (
+            text.includes(botJidNumber) || 
+            (botLidNumber && text.includes(botLidNumber)) || 
+            lowText.includes('bot') || 
+            msg.mentionedJid?.includes(botJidNumber) || 
+            (botLidNumber && msg.mentionedJid?.includes(botLidNumber))
+        );
         const polaHapusKasual = (!isGroup || isBotMentionedLokal) && 
                                 (lowText.includes('hapus') || lowText.includes('delete') || lowText.includes('apus')) && 
                                 (lowText.includes('agenda') || lowText.includes('jadwal') || lowText.includes('id'));
@@ -1285,8 +1292,14 @@ async function startBot() {
         const isHapusLaporan = cmd.startsWith('/hapuslaporan ') || lowText.startsWith('hapus laporan ') || lowText.startsWith('delete laporan ');
 
         const currentNick = getNick(senderJid, msg.pushName, config, 'stable');
-        let isBotMentioned = text && (text.includes(botJidNumber) || lowText.includes('bot') || msg.mentionedJid?.includes(botJidNumber));
-
+        let isBotMentioned = text && (
+            text.includes(botJidNumber) || 
+            (botLidNumber && text.includes(botLidNumber)) || 
+            lowText.includes('bot') || 
+            msg.mentionedJid?.includes(botJidNumber) || 
+            (botLidNumber && msg.mentionedJid?.includes(botLidNumber))
+        );
+        
         // =================================================================
         // MESIN PENGENDUS HIBRIDA GRUP (LOGGING DATABASE & REKAM RAM PASIF)
         // =================================================================
