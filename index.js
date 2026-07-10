@@ -2099,33 +2099,6 @@ Format keluaran WAJIB objek JSON mentah murni tanpa tanda backtick markdown, tan
             }
         }
 
-        // ====================================================================
-        // INTERCEPTOR KASUAL: HAPUS AGENDA SECARA OTOMATIS TANPA SLASH BRAY
-        // ====================================================================
-        const polaHapusKasual = (!isGroup || isBotMentioned) && 
-                                (lowText.includes('hapus') || lowText.includes('delete') || lowText.includes('apus')) && 
-                                (lowText.includes('agenda') || lowText.includes('jadwal') || lowText.includes('id'));
-
-        if (polaHapusKasual) {
-            const matchId = text.match(/(ai_\d{4}|rec_\d{4})/i);
-            if (matchId) {
-                const idTarget = matchId[0].toLowerCase();
-                const idxApus = config.reminders.findIndex(r => r.id === idTarget);
-                
-                if (idxApus !== -1) {
-                    const judulTerhapus = config.reminders[idxApus].judul;
-                    config.reminders.splice(idxApus, 1);
-                    saveConfig(config);
-                    setupSchedules(sock);
-                    await sock.sendMessage(fromJid, { text: `beres yan, agenda "${judulTerhapus}" (ID: ${idTarget}) udah gue apus permanen dari database bray.` }, { quoted: msg });
-                    return;
-                } else {
-                    await sock.sendMessage(fromJid, { text: `agenda dengan id [${idTarget}] ga ketemu di database bray, coba cek listdetail lagi.` }, { quoted: msg });
-                    return;
-                }
-            }
-        }
-
         // 6. JALUR UMUM UTAMA DETEKSI RADAR NIAT (HASIL DEBUG VALID LID)
         const mentionedJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
         
