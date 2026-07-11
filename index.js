@@ -844,11 +844,13 @@ async function checkDeadlines(sock) {
                                    `mau ngingetin bray, sorry seharusnya gue ngingetin lo jam ${jamMissedArr.join(', dan ')}, karena server di belakang gue sempet mati jadi gue baru hidup lagi dan malah baru ngingetin lo di jam ${teksSekarang}.\n\n` +
                                    `• *agenda*: ${reminder.judul}`;
 
+                // SIRKUIT PROTEKSI HARDIK INSTAN: Kunci memori di awal agar interval 10 detik ga nembak dobel bray
                 missedMilestonesThisRun.forEach(m => {
                     const key = milestoneKey(m);
                     if (!reminder.firedMilestones.includes(key)) reminder.firedMilestones.push(key);
                     if (!reminder.missedMilestones.includes(key)) reminder.missedMilestones.push(key);
                 });
+                saveConfig(config);
                 changed = true;
 
                 const targetJids = (reminder.targets || ['group']).map(t => {
@@ -962,9 +964,9 @@ function setupSchedules(sock) {
                     }
                 }
 
-                // KIRIM NOTIFIKASI PENGINGAT UTAMA SEPERTI BIASA
+                // SINKRONISASI ROUTING KAMAR GRUP SASARAN UTAMA BRAY
                 const targetJids = (reminder.targets || ['group']).map(t => {
-                    if (t === 'group') return freshConfig.groupJid;
+                    if (t === 'group') return reminder.groupJidTarget || freshConfig.groupJid;
                     if (t === 'personal') return freshConfig.ownerJid;
                     return t;
                 }).filter(Boolean);
@@ -1025,14 +1027,13 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
         for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
 
         const ext = messageType === 'imageMessage' ? 'jpg' : 'mp4';
-        const localPath = path.join('./', `media_${Date.now}.${ext}`);
+        const localPath = path.join('./', `media_${Date.now()}.${ext}`);
         fs.writeFileSync(localPath, buffer);
 
         const kpsn = getJakartaDateComponents(new Date());
         const konteksWaktuMurni = `${kpsn.year}-${kpsn.month.padStart(2, '0')}-${kpsn.day.padStart(2, '0')} Jam ${kpsn.hour.padStart(2, '0')}:${kpsn.minute.padStart(2, '0')} WIB`;
         const intent = await parseIntentFromText(captionText, konteksWaktuMurni);
         
-        // Membuat penentu waktu dan target internal mandiri khusus berkas media bray
         const tipeJadwal = intent.type || 'deadline';
         const scopeJadwal = fromJid.endsWith('@g.us') ? 'group' : 'personal';
 
@@ -1057,7 +1058,7 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
             firedMilestones: [],
             pendingAITexts: {},
             targets: [fromJid], 
-            mediaPath: localPath, // Memasukkan jalur berkas penyimpanan lokal secara akurat bray
+            mediaPath: localPath, 
             mediaType: messageType === 'imageMessage' ? 'image' : 'video',
             teamTracking: {},
             creator: 'owner media',       
@@ -1069,7 +1070,7 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
         config.reports = config.reports || [];
         saveConfig(config);
         setupSchedules(sock);
-        await sock.sendMessage(fromJid, { text: 'siap berkas laporan media beserta judul teksnya resmi gue kunci ke memori pribadi lu bray.' });
+        await sock.sendMessage(fromJid, { text: 'siap berkas laporan media beserta judul teksnya resmi gue kunci ke memori bray.' });
     } catch (err) {
         console.error('gagal olah data media:', err);
     }
