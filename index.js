@@ -880,6 +880,10 @@ async function checkDeadlines(sock) {
             for (const milestone of normalMilestonesThisRun) {
                 const key = milestoneKey(milestone);
 
+                // KUNCI AMAN: Tandai dan simpan status sukses di awal sebelum meluncurkan antrean chat bray
+                reminder.firedMilestones.push(key);
+                saveConfig(config);
+
                 if ((reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withTracking !== false) {
                     await handleGroupTeamDistribution(sock, reminder, milestone, config);
                 }
@@ -909,7 +913,6 @@ async function checkDeadlines(sock) {
                 }
 
                 await deliverToJids(sock, reminder, targetTextMap);
-                reminder.firedMilestones.push(key);
                 changed = true;
             }
 
