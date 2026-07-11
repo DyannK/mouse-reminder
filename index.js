@@ -228,8 +228,15 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
 
     // SIRKUIT 1: EKSEKUSI JALUR INTERVAL PER MENIT JIKA AKTIF
     if (intervalMin && intervalMin > 0) {
+        // T TAKTIS GOVERNOR: Batasi interval minimum tidak boleh kurang dari 15 menit jika pelacakan tim aktif bray
+        let intervalAmanTim = intervalMin;
+        if (intervalAmanTim < 15 && (withDailyReminder || targetTanggal)) {
+            intervalAmanTim = 15;
+            console.log(`[security-governor] interval kustom terlalu ekstrem bray, otomatis digeser ke batas aman 15 menit.`);
+        }
+
         if (diffMin > 0) {
-            for (let minRemaining = 0; minRemaining <= diffMin; minRemaining += intervalMin) {
+            for (let minRemaining = 0; minRemaining <= diffMin; minRemaining += intervalAmanTim) {
                 if (!milestones.some(m => m.totalMinutes === minRemaining)) {
                     milestones.push({
                         type: 'durasi',
@@ -240,7 +247,7 @@ function calculateMilestonesArray(waktuTarget, waktuMulaiStr, intervalMin, custo
                 }
             }
         }
-    } 
+    }
 
     // SIRKUIT 2: EKSEKUSI JALUR KUSTOM ALARM HARI H JIKA ADA
     if (customMilestones && customMilestones.length > 0) {
@@ -725,7 +732,8 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
 
         if (!groupCache[targetGrupJid]) {
             groupCache[targetGrupJid] = await sock.groupMetadata(targetGrupJid);
-            setTimeout(() => { delete groupCache[groupCache]; }, 10 * 60 * 1000);
+            // PERBAIKAN REFERENSI OBJEK TARGET CACHE GRUP UTUT BRAY
+            setTimeout(() => { delete groupCache[targetGrupJid]; }, 10 * 60 * 1000);
         }
         
         const groupMeta = groupCache[targetGrupJid];
@@ -830,6 +838,12 @@ async function checkDeadlines(sock) {
             }
 
             if (missedMilestonesThisRun.length > 0) {
+                // TAMENG PLATINUM AGAR TIDAK MEMBOMBARDIR CHAT PAS BARU LOGIN SELESAI UNBANNED BRAY
+                if (missedMilestonesThisRun.length > 1) {
+                    console.log(`[anti-flood] terdeteksi ${missedMilestonesThisRun.length} jadwal terlewat. pangkas dan ambil 1 notifikasi paling baru bray.`);
+                    missedMilestonesThisRun = [missedMilestonesThisRun[missedMilestonesThisRun.length - 1]];
+                }
+
                 let jamMissedArr = missedMilestonesThisRun.map(m => {
                     const waktuAlarmMs = reminder.targetTimestamp - (m.totalMinutes * 60 * 1000);
                     const komponenJam = getJakartaDateComponents(new Date(waktuAlarmMs));
