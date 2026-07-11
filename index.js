@@ -549,19 +549,19 @@ async function resolveTemplateForJid(messageTemplate, manualFallback, jid, conte
 async function deliverToJids(sock, reminder, targetTextMap) {
     const entries = Object.entries(targetTextMap);
     
-    // Rombak total Promise.all menjadi perulangan for-of sekuensial murni bray
+    // Rombak total Promise.all menjadi perulangan sekuensial murni bray
     for (let i = 0; i < entries.length; i++) {
         const [jid, text] = entries[i];
         try {
-            // Beri jeda luncur antar target kepala nomor biar ga barengan
-            if (i > 0) await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
+            // Beri jeda luncur antar target kepala nomor biar ga barengan di jaringan
+            if (i > 0) await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
 
-            // Jaring pengaman presens update: biar kalau server wa nolak, bot ga ikut mati total bray
+            // Jaring pengaman presens update biar kalau server wa sibuk, bot ga ikut crash
             try {
                 await sock.sendPresenceUpdate('composing', jid);
                 await new Promise(r => setTimeout(r, 1500));
             } catch (presenceErr) {
-                console.log(`[presence-skip] server wa sibuk, langsung skip composing buat ${jid}`);
+                console.log(`[presence-skip] server wa sibuk, langsung bypass composing buat ${jid}`);
             }
 
             if (reminder.mediaPath && fs.existsSync(reminder.mediaPath)) {
@@ -725,7 +725,7 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
 
         if (!groupCache[targetGrupJid]) {
             groupCache[targetGrupJid] = await sock.groupMetadata(targetGrupJid);
-            setTimeout(() => { delete groupCache[targetGrupJid]; }, 10 * 60 * 1000);
+            setTimeout(() => { delete groupCache[groupCache]; }, 10 * 60 * 1000);
         }
         
         const groupMeta = groupCache[targetGrupJid];
@@ -740,7 +740,7 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
             const userTrack = reminder.teamTracking[memberJid] || { status: 'Belum Respon' };
             if (userTrack.status === 'Absen') continue;
 
-            // JEDA AMAN KELOMPOK: Naikkan waktu istirahat biar bot lo terlihat manusiawi bray bray
+            // JEDA AMAN TIM: Beri ruang napas longgar biar bot lo terlihat manusiawi
             const jedaIstirahatManusiawi = 4000 + Math.random() * 3000;
             await new Promise(r => setTimeout(r, jedaIstirahatManusiawi));
 
@@ -759,7 +759,7 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
                 catatanKaki = `\n\n_lu kan udah konfirmasi hadir tadi, jadi tinggal stand by aja ya pas mulai, mantap bray!_`;
             }
 
-            // KUNCI STRATEGIS ANTI-BAN: Satukan panggilan nama dan isi teks tugas dalam SATU paket bubble bray!
+            // GABUNGKAN DATA: Satukan sapaan nama panggilan dan isi teks keaktifan dalam satu bubble chat bray
             const namaPanggilan = getNick(memberJid, member.pushName || 'bray', config, 'variant', targetGrupJid);
             const pesanFinalGabung = `${namaPanggilan.toLowerCase()},\n\n${text}${catatanKaki}`;
 
@@ -770,7 +770,6 @@ async function handleGroupTeamDistribution(sock, reminder, milestone, config) {
                 console.log(`[presence-skip] gagal composing ke nomor personal tim`);
             }
             
-            // Eksekusi pelepasan satu peluru chat murni mendarat di database bray
             const sentMsg = await sock.sendMessage(memberJid, { text: pesanFinalGabung });
             
             if (reminder.teamTracking[memberJid]) {
@@ -880,7 +879,7 @@ async function checkDeadlines(sock) {
             for (const milestone of normalMilestonesThisRun) {
                 const key = milestoneKey(milestone);
 
-                // KUNCI AMAN: Tandai dan simpan status sukses di awal sebelum meluncurkan antrean chat bray
+                // SIRKUIT KUNCI AMAN: Tandai sukses dan simpan ke disk di awal agar detakan 10 detik ga ngirim dobel
                 reminder.firedMilestones.push(key);
                 saveConfig(config);
 
