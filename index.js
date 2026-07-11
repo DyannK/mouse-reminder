@@ -946,7 +946,7 @@ function setupSchedules(sock) {
             setTimeout(async () => {
                 const freshConfig = loadConfig();
                 
-                // JALUR SPEKTAKULER: AKTIFKAN INTEROGASI ABSEN TIM JIKA SCOPE KELOMPOK AKTIF BRAY
+                // PERBAIKAN KURUNG BRAY: Mengamankan logika penapis ruang lingkup pelacakan tim
                 if ((reminder.scope === 'group' || reminder.scope === 'tertarget') && reminder.withTracking !== false) {
                     const mockMilestoneNow = { label: 'waktu utama', isAuto: true, totalMinutes: 0 };
                     await handleGroupTeamDistribution(sock, reminder, mockMilestoneNow, freshConfig);
@@ -969,7 +969,8 @@ function setupSchedules(sock) {
 
                 const targetTextMap = {};
                 for (const jid of targetJids) {
-                    const context = { sisa: milestone.label, judul: reminder.judul, isNow: !!milestone.isAuto, targetVibes: reminder.targetVibes };
+                    // PERBAIKAN VARIABEL: Mengganti milestone gaib dengan nilai default konvensional
+                    const context = { sisa: 'waktu utama', judul: reminder.judul, isNow: true, targetVibes: reminder.targetVibes };
                     targetTextMap[jid] = (await resolveTemplateForJid(reminder.message, reminder.manualFallback, jid, context, reminder.formal)).text;
                 }
                 await deliverToJids(sock, reminder, targetTextMap);
@@ -1022,49 +1023,53 @@ async function processMediaReminderDownload(sock, msg, fromJid, captionText, con
         for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
 
         const ext = messageType === 'imageMessage' ? 'jpg' : 'mp4';
-        const localPath = path.join('./', `media_${Date.now()}.${ext}`);
+        const localPath = path.join('./', `media_${Date.now}.${ext}`);
         fs.writeFileSync(localPath, buffer);
 
         const kpsn = getJakartaDateComponents(new Date());
         const konteksWaktuMurni = `${kpsn.year}-${kpsn.month.padStart(2, '0')}-${kpsn.day.padStart(2, '0')} Jam ${kpsn.hour.padStart(2, '0')}:${kpsn.minute.padStart(2, '0')} WIB`;
         const intent = await parseIntentFromText(captionText, konteksWaktuMurni);
-        const targetTime = intent.waktu || "07:00";
+        
+        // Membuat penentu waktu dan target internal mandiri khusus berkas media bray
+        const tipeJadwal = intent.type || 'deadline';
+        const scopeJadwal = fromJid.endsWith('@g.us') ? 'group' : 'personal';
 
         config.reminders.push({
-            id: data.type === 'recurring' ? `rec_${Date.now().toString().slice(-4)}` : `ai_${Date.now().toString().slice(-4)}`,
-            type: data.type || 'deadline', 
-            scope: finalScope,
-            targetTimestamp: data.type === 'recurring' ? null : targetTimestamp,
-            tanggal: data.tanggal || null,                                // SINKRONISASI DATA TANGGAL ABSOLUT
-            dailyReminderStartDate: data.dailyReminderStartDate || null,  // SINKRONISASI BATAS AWAL HARIAN
-            dailyReminderTime: data.dailyReminderTime || null,           
-            withDailyReminder: data.withDailyReminder || false,
-            targetVibes: data.targetVibes || null,                        // KUNCI AMAN DATA EMOSI KUSTOM DI DATABASE
-            cronPattern: data.cronPattern || null,
-            judul: data.judul || 'agenda kasual',
-            message: data.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
-            manualFallback: data.judul || 'agenda kasual',
-            nowMessage: data.pesanNow || `sekarang waktunya ${data.judul || 'agenda kasual'} coy!`,
-            nowManualFallback: data.judul || 'agenda kasual',
-            milestones: data.type === 'recurring' ? null : finalMilestones,
-            customMilestones: data.customMilestones || null,
+            id: tipeJadwal === 'recurring' ? `rec_${Date.now().toString().slice(-4)}` : `ai_${Date.now().toString().slice(-4)}`,
+            type: tipeJadwal, 
+            scope: scopeJadwal,
+            targetTimestamp: tipeJadwal === 'recurring' ? null : Date.now() + 60000,
+            tanggal: intent.tanggal || null,
+            dailyReminderStartDate: intent.dailyReminderStartDate || null,
+            dailyReminderTime: intent.dailyReminderTime || null,           
+            withDailyReminder: intent.withDailyReminder || false,
+            targetVibes: intent.targetVibes || null,
+            cronPattern: intent.cronPattern || null,
+            judul: intent.judul || 'agenda media kasual',
+            message: intent.pesanDurasi || `waktunya {judul} bentar lagi nih!`,
+            manualFallback: intent.judul || 'agenda media kasual',
+            nowMessage: intent.pesanNow || `sekarang waktunya {judul} coy!`,
+            nowManualFallback: intent.judul || 'agenda media kasual',
+            milestones: [{ type: 'durasi', totalMinutes: 0, label: 'sekarang', isAuto: true }],
+            customMilestones: intent.customMilestones || null,
             firedMilestones: [],
             pendingAITexts: {},
-            targets: finalScope === 'group' ? ['group'] : targetJidsFinal, 
-            mediaPath: null,
-            mediaType: null,
+            targets: [fromJid], 
+            mediaPath: localPath, // Memasukkan jalur berkas penyimpanan lokal secara akurat bray
+            mediaType: messageType === 'imageMessage' ? 'image' : 'video',
             teamTracking: {},
-            creator: data.creator || 'dyan',       
-            creatorJid: data.creatorJid || '',
-            withTracking: data.withTracking !== false,
-            withReport: data.withReport !== false
+            creator: 'owner media',       
+            creatorJid: fromJid.split('@')[0],
+            withTracking: false,
+            withReport: false
         });
 
+        config.reports = config.reports || [];
         saveConfig(config);
         setupSchedules(sock);
-        await sock.sendMessage(fromJid, { text: 'siap media sama caption udah gue gabungin ke pengingat pribadi lu bray' });
+        await sock.sendMessage(fromJid, { text: 'siap berkas laporan media beserta judul teksnya resmi gue kunci ke memori pribadi lu bray.' });
     } catch (err) {
-        console.error('gagal olah media:', err);
+        console.error('gagal olah data media:', err);
     }
 }
 
